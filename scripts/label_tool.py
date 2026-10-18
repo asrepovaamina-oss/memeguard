@@ -129,7 +129,7 @@ with gr.Blocks(title="Разметка русских мемов") as demo:
     page = gr.State(first_unlabeled_page())
     marked = gr.State(set())
     info = gr.Markdown()
-    gallery = gr.Gallery(columns=4, height=760, object_fit="contain", allow_preview=False)
+    gallery = gr.Gallery(columns=6, height=640, object_fit="contain", allow_preview=False)
     status = gr.Markdown()
     with gr.Row():
         prev_btn = gr.Button("← Назад")

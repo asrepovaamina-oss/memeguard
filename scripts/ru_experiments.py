@@ -53,10 +53,10 @@ DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 RUDE_THR = 0.5
 
 
-def load_labeled():
+def load_memes():
+    """все мемы; у непросмотренных человеком label = -1"""
     df = pd.read_csv(DATA / "ru_memes" / "labels.csv", dtype={"label": "string"})
-    df = df[df["label"].isin(["0", "1"])].copy()
-    df["label"] = df["label"].astype(int)
+    df["label"] = df["label"].where(df["label"].isin(["0", "1"]), "-1").astype(int)
     df["text_ocr"] = df["text"].fillna("")
     vlm = pd.read_csv(CACHE / "vlm_text.csv").fillna("")
     df = df.merge(vlm, on="file", how="left").fillna({"text_vlm": ""})
@@ -193,15 +193,28 @@ def main():
 
     CACHE.mkdir(parents=True, exist_ok=True)
     cfg = json.loads((ROOT / "models" / "head_config.json").read_text())
-    df = load_labeled()
-    print(f"размечено {len(df)}, оскорбительных {df['label'].sum()}")
-
-    df = translate_all(df)
-    feats = clip_features(df, cfg["clip"])
+    everything = load_memes()
+    everything = translate_all(everything)
+    all_feats = clip_features(everything, cfg["clip"])
     heads = load_heads(cfg)
-    y = df["label"].values
     thr = cfg["threshold"]
     rows = []
+
+    # непросмотренные человеком мемы: их выбрал инструмент разметки как наименее
+    # подозрительные, почти все они безобидные. доля забаненных среди них -
+    # примерная оценка ложных банов (с оговоркой, что подозрительность считала та же система)
+    unreviewed = (everything["label"] == -1).values
+    if unreviewed.any():
+        p_u = ensemble_probs(heads, all_feats["img"][unreviewed], all_feats["en"][unreviewed])
+        tox_u = np.array([toxicity(t)["score"] for t in everything["text"][unreviewed]])
+        share = float(((p_u >= thr) | (tox_u >= RUDE_THR)).mean())
+        print(f"непросмотренных мемов {unreviewed.sum()}, система банит из них {share:.1%}")
+
+    keep = ~unreviewed
+    df = everything[keep].reset_index(drop=True)
+    feats = {k: v[keep] for k, v in all_feats.items()}
+    y = df["label"].values
+    print(f"размечено {len(df)}, оскорбительных {y.sum()}")
 
     p_img = ensemble_probs(heads, feats["img"], feats["empty"])
     p_ru = ensemble_probs(heads, feats["img"], feats["ru"])
@@ -239,6 +252,9 @@ def main():
         print(f"  {source:15s} мемов {len(part):4d}, оскорбительных по разметке "
               f"{part['label'].sum():3d}, забанено системой {part['system'].mean():.0%}")
 
+    if unreviewed.any():
+        rows.append({"вариант": f"непросмотренные мемы ({unreviewed.sum()}): доля забаненных",
+                     "FPR": share})
     out = pd.DataFrame(rows).round(3)
     out.to_csv(ROOT / "reports" / "ru_results.csv", index=False)
     preds.to_csv(ROOT / "reports" / "ru_predictions.csv", index=False)
