@@ -1,0 +1,17 @@
+# основное окружение проекта: python 3.11
+# (ноутбуки proj_1/proj_2 прогонялись в python 3.9, их версии в requirements-notebooks-py39.txt)
+torch==2.14.1
+torchvision==0.29.1
+open_clip_torch==3.3.0
+easyocr==1.7.2
+openai==3.35.1
+gradio==6.30.0
+huggingface_hub==2.2.0
+scikit-learn==1.9.1
+numpy==2.4.6
+pandas==3.0.6
+pillow==12.3.0
+matplotlib==3.11.2
+tqdm==4.70.1
+python-dotenv==1.2.4
+ipykernel

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MemeGuard</title>
+  <meta name="description" content="Мультимодальный детектор оскорбительных мемов: OCR, CLIP, обученный классификатор и объяснение от VLM">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%235b5bd6'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="logo" href="#">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/></svg>
+        MemeGuard
+      </a>
+      <nav>
+        <a href="#try">Проверить мем</a>
+        <a href="#how">Как работает</a>
+        <a href="#results">Результаты</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <p class="eyebrow">Capstone · ML + CV + NLP</p>
+      <h1>Оскорбление в меме часто живёт не в&nbsp;картинке и&nbsp;не&nbsp;в&nbsp;тексте, а&nbsp;в&nbsp;их&nbsp;сочетании</h1>
+      <p class="lead">MemeGuard читает текст с мема, смотрит на картинку и текст вместе,
+        показывает, куда смотрела модель, и объясняет решение по-русски.</p>
+      <a class="btn primary" href="#try">Загрузить мем</a>
+    </section>
+
+    <section id="try" class="wrap">
+      <div class="card analyzer">
+        <label id="drop" class="drop" for="file">
+          <input id="file" type="file" accept="image/*" hidden>
+          <img id="preview" alt="" hidden>
+          <span id="drop-hint">
+            <strong>Перетащите мем сюда</strong><br>или нажмите, чтобы выбрать файл
+          </span>
+        </label>
+
+        <div id="result" class="result">
+          <p id="status" class="status">Результат появится здесь</p>
+
+          <div id="score" hidden>
+            <div class="verdict-row">
+              <span id="verdict" class="badge"></span>
+              <span id="prob" class="prob"></span>
+            </div>
+            <div class="meter" aria-hidden="true">
+              <div id="meter-fill" class="meter-fill"></div>
+              <div id="meter-thr" class="meter-thr"></div>
+            </div>
+            <p class="hint">Метка на шкале: порог решения модели</p>
+
+            <label class="field-label" for="text">Текст мема (OCR). Исправьте и пересчитайте:</label>
+            <textarea id="text" rows="2"></textarea>
+            <p id="translated" class="hint" hidden></p>
+            <button id="rescore" class="btn">Пересчитать с этим текстом</button>
+          </div>
+
+          <figure id="heat-wrap" hidden>
+            <img id="heat" alt="Карта значимости Grad-CAM">
+            <figcaption>Grad-CAM: куда смотрела модель</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div id="explain" class="card explain" hidden></div>
+    </section>
+
+    <section id="how" class="wrap">
+      <h2>Как это работает</h2>
+      <ol class="steps">
+        <li><span class="tag cv">CV</span><h3>OCR</h3><p>EasyOCR читает подпись. Две модели, английская и русская, выбор по наличию кириллицы.</p></li>
+        <li><span class="tag nlp">NLP</span><h3>Перевод</h3><p>Текстовый энкодер CLIP знает только английский, поэтому русские подписи переводит LLM.</p></li>
+        <li><span class="tag cv">CV</span><span class="tag nlp">NLP</span><h3>CLIP ViT-L/14</h3><p>Картинка и текст превращаются в векторы в общем пространстве.</p></li>
+        <li><span class="tag ml">ML</span><h3>Матрица взаимодействия</h3><p>Ансамбль из трёх голов FIM (Hate-CLIPper) взвешивает каждую пару признаков картинки и текста.</p></li>
+        <li><span class="tag cv">CV</span><h3>Grad-CAM</h3><p>Градиенты по патчам ViT показывают области, которые двигают решение.</p></li>
+        <li><span class="tag nlp">NLP</span><h3>Объяснение</h3><p>Мультимодальная LLM (Gemini) описывает мем, атакуемые группы и тип атаки. Если она не согласна с моделью, мем уходит на ручную проверку.</p></li>
+      </ol>
+    </section>
+
+    <section id="results" class="wrap">
+      <h2>Результаты</h2>
+      <p class="lead small">Hateful Memes (Facebook AI), 500 мемов dev. Метрика: AUROC, 0.5 соответствует случайному угадыванию.</p>
+      <div id="bars" class="card bars"></div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <p>Учебный проект. Модель ошибается, её решение не является модерацией.
+      Датасет: <a href="https://arxiv.org/abs/2005.04790">Kiela et al., 2020</a>.</p>
+    <p><a id="space-link" href="#">Интерфейс Gradio</a> · <a id="repo-link" href="#">Код на GitHub</a></p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

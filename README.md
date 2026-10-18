@@ -1,0 +1,137 @@
+# MemeGuard: мультимодальный детектор оскорбительных мемов
+
+Capstone-проект курса AI Engineer. Модель смотрит на мем целиком (картинку и текст на ней)
+и оценивает, является ли он оскорбительным (hateful), показывает, куда смотрела, и объясняет
+решение по-русски.
+
+**Почему задача нетривиальная.** Оскорбление в меме часто живёт не в картинке и не в тексте,
+а в их сочетании: подпись «look how many people love you» безобидна на фото пустыни и
+оскорбительна на фото людей определённой группы. Поэтому ни картиночный, ни текстовый
+классификатор по отдельности задачу не решают.
+
+## Как устроено
+
+```mermaid
+flowchart LR
+    A[мем] --> B[OCR<br/>EasyOCR en/ru]
+    B -->|русский текст| T[перевод<br/>LLM]
+    B -->|английский| C
+    T --> C[CLIP ViT-L/14<br/>текстовый энкодер]
+    A --> D[CLIP ViT-L/14<br/>картиночный энкодер]
+    C --> E[FIM-голова x3<br/>ансамбль]
+    D --> E
+    E --> P[вероятность hateful]
+    D --> G[Grad-CAM]
+    A --> V[VLM<br/>Gemini / Qwen3-VL]
+    P --> V
+    V --> X[объяснение +<br/>флаг несогласия]
+```
+
+| Направление | Что используется |
+|---|---|
+| **CV** | CLIP ViT-L/14 (картинки), EasyOCR, Grad-CAM для ViT |
+| **NLP** | CLIP (текст), VLM-промптинг: zero-shot классификация и объяснения, перевод подписей |
+| **ML** | голова FIM (матрица взаимодействия признаков, Hate-CLIPper), ансамбль, сравнение 4 голов на 2 бэкбонах |
+
+## Результаты
+
+Датасет [Hateful Memes](https://arxiv.org/abs/2005.04790) (Facebook AI): 8500 train, 500 dev.
+Метрика AUROC на dev; порог и ранняя остановка подбираются на отложенных 10% train, dev только для оценки.
+
+| Модель | AUROC dev |
+|---|---|
+| Zero-shot CLIP ViT-B/32 (часть 1) | 0.601 |
+| CLIP ViT-B/32 + MLP (часть 1, лучший результат) | 0.698 |
+| Совместная модель со взаимным вниманием (часть 2) | 0.679 |
+| ViT-L/14 + LogReg | 0.710 |
+| **ViT-L/14 + FIM, ансамбль из 3 (итоговая модель)** | **0.737** |
+| то же, но с текстом из OCR вместо разметки | 0.727 |
+
+Находки по ходу работы:
+- **Баг QuickGELU.** `open_clip` по имени `ViT-L-14` собирает модель с обычной GELU, а веса OpenAI
+  обучены с QuickGELU (нужно имя `ViT-L-14-quickgelu`). Исправление дало +0.01..0.02 AUROC.
+- **Сравнение prompting и обучения** (VLM zero-shot против обученной головы) и их ансамбль в
+  [proj_3.ipynb](proj_3.ipynb), раздел 8.
+- **Собственный набор русскоязычных мемов** и перенос через перевод в разделе 10.
+
+Подробности, графики и выводы:
+[proj_1.ipynb](proj_1.ipynb) (EDA, эмбеддинги, классификаторы),
+[proj_2.ipynb](proj_2.ipynb) (совместная модель, дообучение CLIP, Memotion),
+[proj_3.ipynb](proj_3.ipynb) (итоговая модель, баг, OCR, VLM, Grad-CAM, русские мемы).
+
+## Запуск
+
+Нужен Python 3.11.
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Создайте `.env` в корне проекта (ключ Gemini бесплатный, выдаётся в https://aistudio.google.com/apikey):
+
+```
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+```
+
+Без ключа всё работает, кроме объяснений VLM.
+
+### Демо
+
+```bash
+python app.py                    # Gradio на http://127.0.0.1:7860
+```
+
+или в Docker:
+
+```bash
+docker build -t memeguard .
+docker run -p 7860:7860 --env-file .env memeguard
+```
+
+Сайт (`frontend/`, статический, деплоится на Vercel) обращается к Gradio-приложению по API.
+Модель весит около 2 ГБ, бесплатные облачные хостинги её не вмещают, поэтому на время показа
+она запускается на ноутбуке и открывается наружу туннелем Cloudflare. Всё это делает одна команда:
+
+```bash
+bash scripts/start_demo.sh       # нужны cloudflared и vercel login
+```
+
+### Воспроизведение экспериментов
+
+Датасет Hateful Memes распространять нельзя, его нужно скачать самостоятельно
+(например, с Kaggle) и распаковать в `data/` (`data/img/`, `data/train.jsonl`, `data/dev.jsonl`, `data/test.jsonl`).
+
+```bash
+python scripts/extract_clip_features.py --model ViT-L-14-quickgelu --tag vitl14q   # ~15 мин на M-серии
+python scripts/extract_clip_features.py --model ViT-B-32-quickgelu --tag vitb32q
+python scripts/train_heads.py                       # сравнение голов, сохраняет models/
+python scripts/ocr_dev.py                           # OCR по dev
+python scripts/vlm_zero_shot.py --provider gemini --model gemini-flash-lite-latest
+python scripts/vlm_zero_shot.py --provider ollama --model qwen3-vl:8b-instruct     # нужна ollama
+```
+
+Свой набор русскоязычных мемов: картинки в `data/ru_memes/img/`, затем
+`python scripts/make_ru_labels.py` (OCR и таблица для разметки), разметка 0/1 в
+`data/ru_memes/labels.csv`, затем `python scripts/eval_ru_memes.py`.
+
+## Структура
+
+```
+memeguard/          пакет: OCR, головы, пайплайн инференса + Grad-CAM, VLM
+scripts/            извлечение признаков, обучение, эксперименты, деплой
+models/             веса итогового ансамбля голов (9 МБ x 3) и конфиг
+reports/            таблицы результатов экспериментов
+frontend/           сайт для Vercel (HTML + JS, без сборки)
+app.py              Gradio-приложение
+proj_1..3.ipynb     ноутбуки с анализом
+```
+
+## Ограничения
+
+- Датасет англоязычный и американский по контексту; на русских мемах без перевода модель почти слепа.
+- Разметка «hateful» субъективна; модель стоит использовать как фильтр первой линии, а не как судью.
+- Бесплатные API ограничены по числу запросов в день.
+- Датасет Hateful Memes доступен только для исследований, в репозитории его нет.

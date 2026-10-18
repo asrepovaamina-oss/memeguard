@@ -1,0 +1,30 @@
+# окружения
+venv/
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# секреты
+.env
+
+# данные Hateful Memes: лицензия запрещает их распространять,
+# датасет скачивается отдельно (см. README)
+data/img/
+data/*.jsonl
+data/cache/
+data/features/
+data/LICENSE.txt
+data/README.md
+data/ru_memes/img/
+data/ru_memes/predictions.csv
+
+# служебное
+.DS_Store
+.gradio/
+frontend/node_modules/
+frontend/.vercel/
+
+# копия dataset.py из архива и тексты мемов из датасета (пересоздаются скриптами)
+data/dataset.py
+reports/dev_ocr.csv

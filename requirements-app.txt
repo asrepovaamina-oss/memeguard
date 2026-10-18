@@ -1,0 +1,11 @@
+# зависимости демо на Hugging Face Spaces (только CPU, поэтому torch из cpu-индекса)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1
+torchvision==0.29.1
+open_clip_torch==3.3.0
+easyocr==1.7.2
+openai==3.35.1
+gradio==6.30.0
+numpy==2.4.6
+pillow==12.3.0
+python-dotenv==1.2.4

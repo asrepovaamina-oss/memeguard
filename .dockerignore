@@ -1,0 +1,8 @@
+venv/
+.venv/
+data/
+reports/
+frontend/
+*.ipynb
+.env
+.git/

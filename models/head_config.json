@@ -1,0 +1,14 @@
+{
+  "kind": "fim",
+  "backbone": "ViT-L/14",
+  "clip": "ViT-L-14-quickgelu",
+  "dim": 768,
+  "threshold": 0.6599999999999999,
+  "val_auroc": 0.8217636737353988,
+  "n_models": 3,
+  "dev_metrics": {
+    "auroc": 0.7371,
+    "accuracy": 0.644,
+    "macro_f1": 0.631
+  }
+}
