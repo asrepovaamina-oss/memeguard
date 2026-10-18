@@ -3,4 +3,4 @@
 // туннель Cloudflare, и у туннеля при каждом запуске новый адрес
 export const BACKEND_URL = "https://festivals-installed-lawsuit-paintball.trycloudflare.com";
 
-export const REPO_URL = "https://github.com/";
+export const REPO_URL = "https://github.com/asrepovaamina-oss/memeguard";

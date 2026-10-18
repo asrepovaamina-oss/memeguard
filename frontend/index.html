@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MemeGuard</title>
   <meta name="description" content="Мультимодальный детектор оскорбительных мемов: OCR, CLIP, обученный классификатор и объяснение от VLM">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%235b5bd6'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%23ffe14d' stroke='black' stroke-width='2.5'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&family=Rubik+Mono+One&family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,37 +16,66 @@
     <div class="wrap top-row">
       <a class="logo" href="#">
         <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/></svg>
-        MemeGuard
+        MEMEGUARD
       </a>
       <nav>
-        <a href="#try">Проверить мем</a>
+        <a href="#try">Проверить</a>
         <a href="#how">Как работает</a>
-        <a href="#results">Результаты</a>
+        <a href="#results">Цифры</a>
       </nav>
     </div>
   </header>
 
   <main>
     <section class="hero wrap">
-      <p class="eyebrow">Capstone · ML + CV + NLP</p>
-      <h1>Оскорбление в меме часто живёт не в&nbsp;картинке и&nbsp;не&nbsp;в&nbsp;тексте, а&nbsp;в&nbsp;их&nbsp;сочетании</h1>
-      <p class="lead">MemeGuard читает текст с мема, смотрит на картинку и текст вместе,
-        показывает, куда смотрела модель, и объясняет решение по-русски.</p>
-      <a class="btn primary" href="#try">Загрузить мем</a>
+      <div class="hero-text">
+        <span class="sticker s-pink tilt-l">ML + CV + NLP</span>
+        <h1>Мем смешной<br>или <mark>оскорбительный?</mark></h1>
+        <p class="lead">Оскорбление в меме часто живёт не в картинке и не в тексте, а в их
+          сочетании. MemeGuard читает подпись, смотрит на картинку и текст вместе,
+          показывает, куда смотрела модель, и объясняет решение по-русски.</p>
+        <a class="btn btn-big" href="#try">Закинуть мем →</a>
+      </div>
+
+      <div class="hero-meme" aria-hidden="true">
+        <div class="meme-frame">
+          <p class="cap cap-top">когда текст безобидный</p>
+          <div class="meme-pic">🖼️ + 💬</div>
+          <p class="cap cap-bottom">а вместе с картинкой нет</p>
+        </div>
+        <span class="sticker s-blue float-1">CLIP ViT-L/14</span>
+        <span class="sticker s-yellow float-2">Grad-CAM</span>
+        <span class="sticker s-green float-3">Gemini</span>
+      </div>
     </section>
 
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee-track">
+        <span>OCR</span><span>★</span><span>CLIP ViT-L/14</span><span>★</span><span>FIM-ансамбль</span><span>★</span>
+        <span>Grad-CAM</span><span>★</span><span>Gemini</span><span>★</span><span>Qwen3-VL</span><span>★</span>
+        <span>Hateful Memes</span><span>★</span>
+        <span>OCR</span><span>★</span><span>CLIP ViT-L/14</span><span>★</span><span>FIM-ансамбль</span><span>★</span>
+        <span>Grad-CAM</span><span>★</span><span>Gemini</span><span>★</span><span>Qwen3-VL</span><span>★</span>
+        <span>Hateful Memes</span><span>★</span>
+      </div>
+    </div>
+
     <section id="try" class="wrap">
-      <div class="card analyzer">
+      <h2><span class="num">01</span> Проверь мем</h2>
+      <div class="analyzer">
         <label id="drop" class="drop" for="file">
           <input id="file" type="file" accept="image/*" hidden>
           <img id="preview" alt="" hidden>
-          <span id="drop-hint">
-            <strong>Перетащите мем сюда</strong><br>или нажмите, чтобы выбрать файл
+          <span id="stamp" class="stamp" hidden></span>
+          <span id="drop-hint" class="drop-hint">
+            <span class="cap">перетащи мем сюда</span>
+            <span class="drop-icon">📥</span>
+            <span class="cap">или нажми и выбери</span>
           </span>
         </label>
 
-        <div id="result" class="result">
-          <p id="status" class="status">Результат появится здесь</p>
+        <div id="result" class="panel">
+          <p id="status" class="status">Тут появится вердикт</p>
 
           <div id="score" hidden>
             <div class="verdict-row">
@@ -55,49 +84,53 @@
             </div>
             <div class="meter" aria-hidden="true">
               <div id="meter-fill" class="meter-fill"></div>
-              <div id="meter-thr" class="meter-thr"></div>
+              <div id="meter-thr" class="meter-thr"><span>порог</span></div>
             </div>
-            <p class="hint">Метка на шкале: порог решения модели</p>
 
-            <label class="field-label" for="text">Текст мема (OCR). Исправьте и пересчитайте:</label>
+            <label class="field-label" for="text">Текст с мема (распознан OCR). Поменяй и пересчитай:</label>
             <textarea id="text" rows="2"></textarea>
             <p id="translated" class="hint" hidden></p>
-            <button id="rescore" class="btn">Пересчитать с этим текстом</button>
+            <button id="rescore" class="btn">🔁 Пересчитать с этим текстом</button>
+            <p class="hint">Попробуй заменить пару слов: та же картинка с другой подписью может
+              стать безобидной или наоборот.</p>
           </div>
 
           <figure id="heat-wrap" hidden>
             <img id="heat" alt="Карта значимости Grad-CAM">
-            <figcaption>Grad-CAM: куда смотрела модель</figcaption>
+            <figcaption>🔥 Grad-CAM: куда смотрела модель</figcaption>
           </figure>
         </div>
       </div>
 
-      <div id="explain" class="card explain" hidden></div>
+      <div id="explain" class="explain" hidden></div>
     </section>
 
     <section id="how" class="wrap">
-      <h2>Как это работает</h2>
+      <h2><span class="num">02</span> Как это работает</h2>
       <ol class="steps">
-        <li><span class="tag cv">CV</span><h3>OCR</h3><p>EasyOCR читает подпись. Две модели, английская и русская, выбор по наличию кириллицы.</p></li>
-        <li><span class="tag nlp">NLP</span><h3>Перевод</h3><p>Текстовый энкодер CLIP знает только английский, поэтому русские подписи переводит LLM.</p></li>
-        <li><span class="tag cv">CV</span><span class="tag nlp">NLP</span><h3>CLIP ViT-L/14</h3><p>Картинка и текст превращаются в векторы в общем пространстве.</p></li>
-        <li><span class="tag ml">ML</span><h3>Матрица взаимодействия</h3><p>Ансамбль из трёх голов FIM (Hate-CLIPper) взвешивает каждую пару признаков картинки и текста.</p></li>
-        <li><span class="tag cv">CV</span><h3>Grad-CAM</h3><p>Градиенты по патчам ViT показывают области, которые двигают решение.</p></li>
-        <li><span class="tag nlp">NLP</span><h3>Объяснение</h3><p>Мультимодальная LLM (Gemini) описывает мем, атакуемые группы и тип атаки. Если она не согласна с моделью, мем уходит на ручную проверку.</p></li>
+        <li class="c-yellow"><span class="tag">CV</span><h3>OCR</h3><p>EasyOCR читает подпись. Две модели, английская и русская, выбор по кириллице.</p></li>
+        <li class="c-pink"><span class="tag">NLP</span><h3>Перевод</h3><p>Текстовый энкодер CLIP знает только английский, поэтому русские подписи переводит LLM.</p></li>
+        <li class="c-blue"><span class="tag">CV</span><span class="tag">NLP</span><h3>CLIP ViT-L/14</h3><p>Картинка и текст превращаются в векторы в одном пространстве.</p></li>
+        <li class="c-green"><span class="tag">ML</span><h3>FIM-ансамбль</h3><p>Матрица взаимодействия (Hate-CLIPper) взвешивает каждую пару признаков «картинка × текст». Три модели голосуют.</p></li>
+        <li class="c-orange"><span class="tag">CV</span><h3>Grad-CAM</h3><p>Градиенты по патчам ViT подсвечивают области, которые двигают решение.</p></li>
+        <li class="c-violet"><span class="tag">NLP</span><h3>Объяснение</h3><p>VLM описывает мем, атакуемые группы и тип атаки. Не согласна с моделью? Мем идёт к человеку.</p></li>
       </ol>
     </section>
 
     <section id="results" class="wrap">
-      <h2>Результаты</h2>
-      <p class="lead small">Hateful Memes (Facebook AI), 500 мемов dev. Метрика: AUROC, 0.5 соответствует случайному угадыванию.</p>
-      <div id="bars" class="card bars"></div>
+      <h2><span class="num">03</span> Цифры</h2>
+      <p class="lead small">Hateful Memes (Facebook AI), 500 мемов dev. Метрика AUROC: 0.5 это монетка, 1.0 идеал.</p>
+      <div id="bars" class="bars"></div>
     </section>
   </main>
 
-  <footer class="wrap foot">
-    <p>Учебный проект. Модель ошибается, её решение не является модерацией.
-      Датасет: <a href="https://arxiv.org/abs/2005.04790">Kiela et al., 2020</a>.</p>
-    <p><a id="space-link" href="#">Интерфейс Gradio</a> · <a id="repo-link" href="#">Код на GitHub</a></p>
+  <footer class="foot">
+    <div class="wrap">
+      <p class="cap foot-cap">не бань меня, я просто мем</p>
+      <p>Учебный capstone-проект. Модель ошибается, её решение не является модерацией.
+        Датасет: <a href="https://arxiv.org/abs/2005.04790">Kiela et al., 2020</a>.</p>
+      <p><a id="space-link" href="#">Интерфейс Gradio</a> · <a id="repo-link" href="#">Код на GitHub</a></p>
+    </div>
   </footer>
 
   <script type="module" src="app.js"></script>

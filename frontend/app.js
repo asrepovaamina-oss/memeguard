@@ -41,6 +41,13 @@ function renderScore(r) {
   $("prob").textContent = `${pct}%`;
   $("verdict").textContent = r.hateful ? "Оскорбительный" : "Не оскорбительный";
   $("verdict").className = `badge ${r.hateful ? "bad" : "ok"}`;
+  // штамп поверх мема: пересоздаю класс, чтобы анимация проигрывалась заново
+  const stamp = $("stamp");
+  stamp.hidden = true;
+  stamp.textContent = r.hateful ? "оскорбительный" : "норм";
+  stamp.className = `stamp ${r.hateful ? "bad" : "ok"}`;
+  void stamp.offsetWidth;
+  stamp.hidden = false;
   $("meter-fill").style.width = `${pct}%`;
   $("meter-fill").classList.toggle("bad", r.hateful);
   $("meter-thr").style.left = `${r.threshold * 100}%`;
@@ -124,6 +131,7 @@ function pick(file) {
   $("preview").src = URL.createObjectURL(file);
   $("preview").hidden = false;
   $("drop-hint").hidden = true;
+  $("stamp").hidden = true;
   run();
 }
 
