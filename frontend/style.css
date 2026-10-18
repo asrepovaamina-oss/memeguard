@@ -177,6 +177,8 @@ h2 { font: 700 clamp(36px, 5vw, 56px)/1 Oswald, Impact, sans-serif; text-transfo
 .meter-thr { position: absolute; top: -8px; width: 4px; height: 32px; background: var(--line); border-radius: 2px; }
 .meter-thr span { position: absolute; top: 34px; left: 50%; translate: -50% 0; font-size: 12px; font-weight: 700; white-space: nowrap; }
 
+.final-note { font-weight: 700; font-size: 14px; background: var(--yellow); color: #111; border: 2.5px solid #111; border-radius: 10px; padding: 8px 12px; margin: -12px 0 18px; }
+
 .field-label { display: block; font-weight: 700; font-size: 15px; margin-bottom: 8px; }
 textarea {
   width: 100%; font: 500 16px Rubik, sans-serif; padding: 12px 14px; margin-bottom: 12px; resize: vertical;

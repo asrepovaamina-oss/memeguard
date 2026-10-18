@@ -21,7 +21,7 @@ from pathlib import Path
 import gradio as gr
 from dotenv import load_dotenv
 
-from memeguard.explain import analyze, get_llm, has_cyrillic, translate_to_english
+from memeguard.explain import analyze, get_llm, has_cyrillic, translate_to_english, verdict_score
 from memeguard.ocr import extract_text, get_reader
 from memeguard.pipeline import MemeGuard
 
@@ -60,13 +60,26 @@ def clip_text(text):
     return text
 
 
+def combine(prob, result):
+    """
+    итог ансамбля: среднее вероятности классификатора и оценки VLM.
+    на dev это AUROC 0.811 против 0.737 у классификатора и 0.759 у VLM
+    (proj_3.ipynb, раздел 8). вес 0.5 и порог 0.5 не подбирались
+    """
+    score = verdict_score(result) if "error" not in result else None
+    return None if score is None else (prob + score) / 2
+
+
 def explanation_md(result, prob):
     if "error" in result:
         return f"Объяснение недоступно: {result['error']}"
+    final = combine(prob, result)
     verdict = "оскорбительный" if result["verdict"] == "hateful" else "не оскорбительный"
     agree = (result["verdict"] == "hateful") == (prob >= guard.threshold)
     groups = ", ".join(result["target_groups"]) or "нет"
     lines = [
+        f"## Итог (классификатор + VLM): {'оскорбительный' if final >= 0.5 else 'не оскорбительный'}, "
+        f"{final:.0%}",
         f"### VLM: {verdict} (уверенность: {result['confidence']})",
         "" if agree else "> VLM не согласна с классификатором, мем стоит проверить вручную.",
         f"**Что на картинке.** {result['image_description']}",
@@ -95,7 +108,9 @@ def run_analysis(image, explain):
     yield text, translated, verdict_label(prob), verdict_md(prob), heat, waiting, img_emb
 
     if explain and HAS_LLM:
-        result = analyze(image, text, model_prob=prob, llm=LLM)
+        # вероятность классификатора VLM не показываю: для ансамбля оценки
+        # должны быть независимыми, как в эксперименте на dev
+        result = analyze(image, text, llm=LLM)
         yield (text, translated, verdict_label(prob), verdict_md(prob), heat,
                explanation_md(result, prob), img_emb)
     elif explain:
@@ -137,7 +152,12 @@ def web_analyze(image, text, explain):
     yield result, heat
 
     if explain and HAS_LLM:
-        result["explanation"] = analyze(image, text, model_prob=prob, llm=LLM)
+        result["explanation"] = analyze(image, text, llm=LLM)
+        final = combine(prob, result["explanation"])
+        if final is not None:
+            result["vlm_score"] = verdict_score(result["explanation"])
+            result["combined"] = final
+            result["combined_hateful"] = final >= 0.5
     result["stage"] = "done"
     yield result, heat
 

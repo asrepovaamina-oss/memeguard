@@ -28,3 +28,7 @@ frontend/.vercel/
 # копия dataset.py из архива и тексты мемов из датасета (пересоздаются скриптами)
 data/dataset.py
 reports/dev_ocr.csv
+
+# русские мемы с Kaggle (lexusbedra/memes-in-russian-picture-dataset), скачиваются отдельно
+data/russian memes/
+data/.DS_Store

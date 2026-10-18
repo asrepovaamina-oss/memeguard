@@ -113,9 +113,14 @@ python scripts/vlm_zero_shot.py --provider gemini --model gemini-flash-lite-late
 python scripts/vlm_zero_shot.py --provider ollama --model qwen3-vl:8b-instruct     # нужна ollama
 ```
 
-Свой набор русскоязычных мемов: картинки в `data/ru_memes/img/`, затем
-`python scripts/make_ru_labels.py` (OCR и таблица для разметки), разметка 0/1 в
-`data/ru_memes/labels.csv`, затем `python scripts/eval_ru_memes.py`.
+Русскоязычные мемы из двух источников:
+- 684 обычных мема из Kaggle-датасета
+  [Memes in Russian](https://www.kaggle.com/datasets/lexusbedra/memes-in-russian-picture-dataset)
+  (без разметки, распаковать в `data/russian memes/`);
+- оскорбительные мемы, собранные вручную, в `data/ru_memes/img/`.
+
+`python scripts/make_ru_labels.py` прогоняет OCR и создаёт таблицу `data/ru_memes/labels.csv`,
+разметка 0/1 ставится в ней, затем `python scripts/eval_ru_memes.py`.
 
 ## Структура
 

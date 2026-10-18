@@ -37,6 +37,7 @@ function esc(s) {
 
 function renderScore(r) {
   $("score").hidden = false;
+  $("final-note").hidden = true;
   const pct = Math.round(r.prob * 100);
   $("prob").textContent = `${pct}%`;
   $("verdict").textContent = r.hateful ? "Оскорбительный" : "Не оскорбительный";
@@ -57,6 +58,26 @@ function renderScore(r) {
   if (translated) $("translated").textContent = `Перевод для CLIP: ${r.text_en}`;
 }
 
+// итог ансамбля: среднее классификатора и VLM (на dev AUROC 0.81 против 0.74 и 0.76 по отдельности)
+function renderFinal(r) {
+  const pct = Math.round(r.combined * 100);
+  $("verdict").textContent = r.combined_hateful ? "Оскорбительный" : "Не оскорбительный";
+  $("verdict").className = `badge ${r.combined_hateful ? "bad" : "ok"}`;
+  $("prob").textContent = `${pct}%`;
+  $("meter-fill").style.width = `${pct}%`;
+  $("meter-fill").classList.toggle("bad", r.combined_hateful);
+  $("meter-thr").style.left = "50%";
+  $("final-note").hidden = false;
+  $("final-note").textContent =
+    `Итог ансамбля: классификатор ${Math.round(r.prob * 100)}% + VLM ${Math.round(r.vlm_score * 100)}%, среднее ${pct}%`;
+  const stamp = $("stamp");
+  stamp.hidden = true;
+  stamp.textContent = r.combined_hateful ? "оскорбительный" : "норм";
+  stamp.className = `stamp ${r.combined_hateful ? "bad" : "ok"}`;
+  void stamp.offsetWidth;
+  stamp.hidden = false;
+}
+
 function renderExplanation(e, modelHateful) {
   const box = $("explain");
   if (!e) { box.hidden = true; return; }
@@ -70,7 +91,7 @@ function renderExplanation(e, modelHateful) {
     ? e.target_groups.map((g) => `<span class="chip">${esc(g)}</span>`).join("")
     : "нет";
   box.innerHTML = `
-    <h3>VLM: ${vlmHateful ? "оскорбительный" : "не оскорбительный"}
+    <h3>Мнение VLM: ${vlmHateful ? "оскорбительный" : "не оскорбительный"}
       <span class="hint">(уверенность ${CONF_RU[e.confidence] ?? e.confidence})</span></h3>
     ${vlmHateful !== modelHateful
       ? '<div class="warn">VLM не согласна с классификатором. Такой мем стоит проверить вручную.</div>' : ""}
@@ -114,6 +135,7 @@ async function run(text = "") {
       if (r.stage === "done") {
         setStatus("");
         if (!text) renderExplanation(r.explanation, r.hateful);
+        if (r.combined != null) renderFinal(r);
       }
     }
   } catch (err) {
