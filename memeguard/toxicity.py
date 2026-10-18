@@ -48,9 +48,11 @@ def toxicity(text):
         proba = torch.sigmoid(model(**inputs).logits)[0]
         names = [model.config.id2label[i] for i in range(len(proba))]
         p = dict(zip(names, proba.tolist()))
-        # агрегат из карточки модели: текст токсичен, если он не "non-toxic"
-        # или если он опасный (опасное бывает и без грубых слов)
-        score = 1 - p["non-toxic"] * (1 - p["dangerous"])
+        # в карточке модели предлагается агрегат 1 - p(non-toxic) * (1 - p(dangerous)),
+        # но метка dangerous означает «может навредить репутации говорящего» и на
+        # русских мемах срабатывала на безобидное («староста и его зам мышь побольше»).
+        # поэтому грубость = самая сильная из оскорбления, мата и угрозы
+        score = max(p["insult"], p["obscenity"], p["threat"])
         labels = {LABELS_RU[k]: v for k, v in p.items() if k != "non-toxic"}
         return {"score": score, "labels": labels, "model": RU_MODEL}
 

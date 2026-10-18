@@ -184,6 +184,35 @@ def classify(image, text, llm=None):
     return {"verdict": data["verdict"], "confidence": data["confidence"]}
 
 
+CLASSIFY_TWO_PROMPT = SYSTEM_PROMPT.split("Ответь строго")[0] + (
+    'Ответь строго одним JSON-объектом с полями: "verdict" ("hateful" или "not_hateful"), '
+    '"confidence" ("low", "medium" или "high") - про ненависть к группе, и "rude" (true или '
+    'false) - про грубость. Без пояснений.')
+
+
+def classify_two(image, text, llm=None):
+    """
+    короткий вариант analyze для экспериментов: те же два вопроса, что видит
+    демо (ненависть и грубость), но без объяснений, поэтому в разы быстрее
+    """
+    client, model = llm or get_llm()
+    response = _create(client, model, temperature=0, max_tokens=100,
+                       response_format={"type": "json_object"}, messages=[
+                           {"role": "system", "content": CLASSIFY_TWO_PROMPT},
+                           {"role": "user", "content": [
+                               {"type": "image_url",
+                                "image_url": {"url": _image_url(image, max_side=768)}},
+                               {"type": "text", "text": f"Текст на меме: «{text or '(нет)'}»"},
+                           ]}])
+    raw = _content(response)
+    data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+    if (data.get("verdict") not in ENUMS["verdict"]
+            or data.get("confidence") not in ENUMS["confidence"]):
+        raise ValueError(f"неожиданный ответ: {raw[:200]}")
+    data["rude"] = data.get("rude") in (True, "true", "True", 1)
+    return data
+
+
 READ_TEXT_PROMPT = (
     "Перепиши весь текст с картинки мема дословно, в исходном языке, одной строкой, "
     "строчными буквами. Сохраняй мат и опечатки как есть. Если текста нет, ответь пустой "

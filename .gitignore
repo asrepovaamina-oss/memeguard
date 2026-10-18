@@ -33,3 +33,6 @@ reports/dev_ocr.csv
 # русские мемы с Kaggle (lexusbedra/memes-in-russian-picture-dataset), скачиваются отдельно
 data/russian memes/
 data/.DS_Store
+data/ru_memes/labels.csv
+data/ru_memes/suspicion.csv
+data/ru_memes/cache/
