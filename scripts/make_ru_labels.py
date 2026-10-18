@@ -4,7 +4,10 @@
 два источника русских мемов:
 - data/russian memes/ - 684 мема без разметки (почти все безобидные), Kaggle:
   lexusbedra/memes-in-russian-picture-dataset
-- data/ru_memes/img/  - оскорбительные мемы, которые я собрала сама
+- data/негативные 20 мемов/ - грубые мемы, которые я собрала сама (мат, хамство).
+  почти все они по определению датасета не hateful: нет атаки на группу.
+  нужны как трудные отрицательные примеры: не путает ли модель грубость с ненавистью
+- data/ru_memes/img/  - оскорбительные (hateful) мемы, которые я собрала сама
 скрипт прогоняет OCR и создаёт data/ru_memes/labels.csv с колонками:
     file  - путь к файлу относительно data/
     source - откуда мем
@@ -29,7 +32,11 @@ sys.path.insert(0, str(ROOT))
 from memeguard.ocr import extract_text  # noqa: E402
 
 DATA = ROOT / "data"
-SOURCES = {"готовый набор": DATA / "russian memes", "собрала сама": DATA / "ru_memes" / "img"}
+SOURCES = {
+    "готовый набор": DATA / "russian memes",
+    "грубые": DATA / "негативные 20 мемов",
+    "собрала сама": DATA / "ru_memes" / "img",
+}
 LABELS = DATA / "ru_memes" / "labels.csv"
 EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 

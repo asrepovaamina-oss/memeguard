@@ -31,9 +31,9 @@
       <div class="hero-text">
         <span class="sticker s-pink tilt-l">ML + CV + NLP</span>
         <h1>Мем смешной<br>или <mark>оскорбительный?</mark></h1>
-        <p class="lead">Оскорбление в меме часто живёт не в картинке и не в тексте, а в их
-          сочетании. MemeGuard читает подпись, смотрит на картинку и текст вместе,
-          показывает, куда смотрела модель, и объясняет решение по-русски.</p>
+        <p class="lead">MemeGuard ищет в меме две вещи: ненависть к группе людей, которая
+          часто живёт только в сочетании картинки и текста, и грубость с матом. Показывает,
+          куда смотрела модель, и объясняет решение по-русски.</p>
         <a class="btn btn-big" href="#try">Закинуть мем →</a>
       </div>
 
@@ -80,16 +80,29 @@
           <div id="score" hidden>
             <div class="verdict-row">
               <span id="verdict" class="badge"></span>
-              <span id="prob" class="prob"></span>
+              <span id="reasons" class="reasons"></span>
             </div>
-            <div class="meter" aria-hidden="true">
-              <div id="meter-fill" class="meter-fill"></div>
-              <div id="meter-thr" class="meter-thr"><span>порог</span></div>
-            </div>
-            <p id="final-note" class="final-note" hidden></p>
 
-            <label class="field-label" for="text">Текст с мема (распознан OCR). Поменяй и пересчитай:</label>
+            <div class="gauge">
+              <div class="gauge-head"><b>🔥 Ненависть к группе</b><span id="hate-val" class="gauge-val"></span></div>
+              <div class="meter" aria-hidden="true">
+                <div id="hate-fill" class="meter-fill"></div>
+                <div id="hate-thr" class="meter-thr"><span>порог</span></div>
+              </div>
+              <p id="hate-src" class="hint"></p>
+            </div>
+            <div class="gauge">
+              <div class="gauge-head"><b>🤬 Грубость и мат</b><span id="rude-val" class="gauge-val"></span></div>
+              <div class="meter" aria-hidden="true">
+                <div id="rude-fill" class="meter-fill"></div>
+                <div id="rude-thr" class="meter-thr"><span>порог</span></div>
+              </div>
+              <p id="rude-src" class="hint"></p>
+            </div>
+
+            <label class="field-label" for="text">Текст с мема. Поменяй и пересчитай:</label>
             <textarea id="text" rows="2"></textarea>
+            <p id="text-source" class="hint"></p>
             <p id="translated" class="hint" hidden></p>
             <button id="rescore" class="btn">🔁 Пересчитать с этим текстом</button>
             <p class="hint">Попробуй заменить пару слов: та же картинка с другой подписью может
@@ -114,7 +127,8 @@
         <li class="c-blue"><span class="tag">CV</span><span class="tag">NLP</span><h3>CLIP ViT-L/14</h3><p>Картинка и текст превращаются в векторы в одном пространстве.</p></li>
         <li class="c-green"><span class="tag">ML</span><h3>FIM-ансамбль</h3><p>Матрица взаимодействия (Hate-CLIPper) взвешивает каждую пару признаков «картинка × текст». Три модели голосуют.</p></li>
         <li class="c-orange"><span class="tag">CV</span><h3>Grad-CAM</h3><p>Градиенты по патчам ViT подсвечивают области, которые двигают решение.</p></li>
-        <li class="c-violet"><span class="tag">NLP</span><h3>Объяснение</h3><p>VLM описывает мем, атакуемые группы и тип атаки. Не согласна с моделью? Мем идёт к человеку.</p></li>
+        <li class="c-yellow"><span class="tag">NLP</span><h3>Грубость</h3><p>Предобученные модели токсичности (ruBERT для русского, RoBERTa для английского) ловят мат, хамство и угрозы.</p></li>
+        <li class="c-violet"><span class="tag">NLP</span><h3>Объяснение</h3><p>VLM точнее OCR читает текст, описывает мем, атакуемые группы и грубость. Не согласна с моделью? Мем идёт к человеку.</p></li>
       </ol>
     </section>
 

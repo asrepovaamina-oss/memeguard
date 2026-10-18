@@ -35,50 +35,47 @@ function esc(s) {
   return d.innerHTML;
 }
 
-function renderScore(r) {
-  $("score").hidden = false;
-  $("final-note").hidden = true;
-  const pct = Math.round(r.prob * 100);
-  $("prob").textContent = `${pct}%`;
-  $("verdict").textContent = r.hateful ? "Оскорбительный" : "Не оскорбительный";
-  $("verdict").className = `badge ${r.hateful ? "bad" : "ok"}`;
-  // штамп поверх мема: пересоздаю класс, чтобы анимация проигрывалась заново
+function meter(id, value, threshold, on) {
+  $(`${id}-fill`).style.width = `${Math.round(value * 100)}%`;
+  $(`${id}-fill`).classList.toggle("bad", on);
+  $(`${id}-thr`).style.left = `${threshold * 100}%`;
+  $(`${id}-val`).textContent = `${Math.round(value * 100)}%`;
+}
+
+// штамп поверх мема: пересоздаю класс, чтобы анимация проигрывалась заново
+function slam(offensive) {
   const stamp = $("stamp");
   stamp.hidden = true;
-  stamp.textContent = r.hateful ? "оскорбительный" : "норм";
-  stamp.className = `stamp ${r.hateful ? "bad" : "ok"}`;
+  stamp.textContent = offensive ? "оскорбительный" : "норм";
+  stamp.className = `stamp ${offensive ? "bad" : "ok"}`;
   void stamp.offsetWidth;
   stamp.hidden = false;
-  $("meter-fill").style.width = `${pct}%`;
-  $("meter-fill").classList.toggle("bad", r.hateful);
-  $("meter-thr").style.left = `${r.threshold * 100}%`;
+}
+
+function render(r, final) {
+  $("score").hidden = false;
+  $("verdict").textContent = r.offensive ? "Оскорбительный" : "Нормальный";
+  $("verdict").className = `badge ${r.offensive ? "bad" : "ok"}`;
+  $("reasons").textContent = r.reasons.length ? r.reasons.join(" + ") : "";
+
+  // у ненависти порог 0.5, когда есть оценка VLM (ансамбль), иначе порог классификатора
+  const hateThr = r.vlm_score != null ? 0.5 : r.threshold;
+  meter("hate", r.hate_score, hateThr, r.hate);
+  meter("rude", r.rude_score, 0.5, r.rude);
+  $("hate-src").textContent = r.vlm_score != null ? "классификатор + VLM" : "классификатор";
+  $("rude-src").textContent = r.vlm_rude ? "модель токсичности + VLM" : "модель токсичности";
+
   $("text").value = r.text;
+  $("text-source").textContent = r.text_source === "VLM"
+    ? "Текст уточнён VLM: OCR прочитал его с ошибками" : `Источник текста: ${r.text_source}`;
   const translated = r.text_en && r.text_en !== r.text;
   $("translated").hidden = !translated;
   if (translated) $("translated").textContent = `Перевод для CLIP: ${r.text_en}`;
+  if (final) slam(r.offensive);
 }
 
-// итог ансамбля: среднее классификатора и VLM (на dev AUROC 0.81 против 0.74 и 0.76 по отдельности)
-function renderFinal(r) {
-  const pct = Math.round(r.combined * 100);
-  $("verdict").textContent = r.combined_hateful ? "Оскорбительный" : "Не оскорбительный";
-  $("verdict").className = `badge ${r.combined_hateful ? "bad" : "ok"}`;
-  $("prob").textContent = `${pct}%`;
-  $("meter-fill").style.width = `${pct}%`;
-  $("meter-fill").classList.toggle("bad", r.combined_hateful);
-  $("meter-thr").style.left = "50%";
-  $("final-note").hidden = false;
-  $("final-note").textContent =
-    `Итог ансамбля: классификатор ${Math.round(r.prob * 100)}% + VLM ${Math.round(r.vlm_score * 100)}%, среднее ${pct}%`;
-  const stamp = $("stamp");
-  stamp.hidden = true;
-  stamp.textContent = r.combined_hateful ? "оскорбительный" : "норм";
-  stamp.className = `stamp ${r.combined_hateful ? "bad" : "ok"}`;
-  void stamp.offsetWidth;
-  stamp.hidden = false;
-}
-
-function renderExplanation(e, modelHateful) {
+function renderExplanation(r) {
+  const e = r.explanation;
   const box = $("explain");
   if (!e) { box.hidden = true; return; }
   box.hidden = false;
@@ -86,15 +83,15 @@ function renderExplanation(e, modelHateful) {
     box.innerHTML = `<p class="hint">Объяснение недоступно: ${esc(e.error)}</p>`;
     return;
   }
-  const vlmHateful = e.verdict === "hateful";
+  const vlmHate = e.verdict === "hateful";
   const groups = e.target_groups.length
     ? e.target_groups.map((g) => `<span class="chip">${esc(g)}</span>`).join("")
     : "нет";
   box.innerHTML = `
-    <h3>Мнение VLM: ${vlmHateful ? "оскорбительный" : "не оскорбительный"}
+    <h3>Мнение VLM: ${vlmHate ? "ненависть к группе" : "ненависти нет"}${e.rude ? ", грубый" : ""}
       <span class="hint">(уверенность ${CONF_RU[e.confidence] ?? e.confidence})</span></h3>
-    ${vlmHateful !== modelHateful
-      ? '<div class="warn">VLM не согласна с классификатором. Такой мем стоит проверить вручную.</div>' : ""}
+    ${vlmHate !== (r.prob >= r.threshold)
+      ? '<div class="warn">VLM и классификатор расходятся в оценке ненависти. Такой мем стоит проверить вручную.</div>' : ""}
     <dl>
       <dt>Что на картинке</dt><dd>${esc(e.image_description)}</dd>
       <dt>Что значит текст</dt><dd>${esc(e.text_meaning)}</dd>
@@ -111,12 +108,13 @@ async function run(text = "") {
     $("score").hidden = true;
     $("heat-wrap").hidden = true;
     $("explain").hidden = true;
+    $("stamp").hidden = true;
   }
   setStatus("Подключаюсь к модели...", true);
 
   try {
     const client = await getClient();
-    setStatus(text ? "Пересчитываю..." : "Читаю текст и считаю вероятность...", true);
+    setStatus(text ? "Пересчитываю..." : "Читаю текст и считаю оценки...", true);
     const job = client.submit("/web_analyze", [handle_file(currentFile), text, !text]);
 
     for await (const msg of job) {
@@ -125,17 +123,16 @@ async function run(text = "") {
       }
       if (msg.type !== "data") continue;
       const [r, heat] = msg.data;
-      renderScore(r);
+      render(r, r.stage === "done");
       if (heat?.url) {
         $("heat").src = heat.url;
         $("heat-wrap").hidden = false;
       }
       if (r.stage === "score") setStatus("Строю карту значимости...", true);
-      if (r.stage === "saliency") setStatus(text ? "" : "VLM анализирует мем...", !text);
+      if (r.stage === "saliency") setStatus(text ? "" : "VLM читает и анализирует мем...", !text);
       if (r.stage === "done") {
         setStatus("");
-        if (!text) renderExplanation(r.explanation, r.hateful);
-        if (r.combined != null) renderFinal(r);
+        if (!text) renderExplanation(r);
       }
     }
   } catch (err) {
@@ -153,7 +150,6 @@ function pick(file) {
   $("preview").src = URL.createObjectURL(file);
   $("preview").hidden = false;
   $("drop-hint").hidden = true;
-  $("stamp").hidden = true;
   run();
 }
 
@@ -173,9 +169,9 @@ const max = Math.max(...RESULTS.map((r) => r.auroc));
 $("bars").innerHTML = RESULTS.map((r) => `
   <div class="bar-row ${r.auroc === max ? "best" : ""}">
     <span>${esc(r.name)}</span>
-    <div class="bar-track"><div class="bar-fill" style="width:${((r.auroc - 0.5) / 0.3) * 100}%"></div></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${((r.auroc - 0.5) / 0.35) * 100}%"></div></div>
     <span class="bar-val">${r.auroc.toFixed(3)}</span>
-  </div>`).join("") + '<p class="hint">Шкала столбиков начинается с 0.5 (случайное угадывание) и идёт до 0.8.</p>';
+  </div>`).join("") + '<p class="hint">Шкала столбиков начинается с 0.5 (случайное угадывание) и идёт до 0.85.</p>';
 
 $("space-link").href = BACKEND_URL;
 $("repo-link").href = REPO_URL;

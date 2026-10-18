@@ -119,8 +119,9 @@ python scripts/vlm_zero_shot.py --provider ollama --model qwen3-vl:8b-instruct  
   (без разметки, распаковать в `data/russian memes/`);
 - оскорбительные мемы, собранные вручную, в `data/ru_memes/img/`.
 
-`python scripts/make_ru_labels.py` прогоняет OCR и создаёт таблицу `data/ru_memes/labels.csv`,
-разметка 0/1 ставится в ней, затем `python scripts/eval_ru_memes.py`.
+`python scripts/make_ru_labels.py` прогоняет OCR и создаёт таблицу `data/ru_memes/labels.csv`;
+разметка в браузере: `python scripts/label_tool.py` (страницы по 12 мемов, клик по оскорбительным),
+затем `python scripts/ru_experiments.py` (перенос, дообучение с кросс-валидацией, VLM).
 
 ## Структура
 

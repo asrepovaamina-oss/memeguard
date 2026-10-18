@@ -1,21 +1,25 @@
 """
-демо MemeGuard на Gradio (локально и на Hugging Face Spaces)
+демо MemeGuard на Gradio (локально и как API для сайта на Vercel)
 
-что происходит при загрузке мема:
-1. OCR достаёт текст (CV)
-2. если текст русский, LLM переводит его на английский для CLIP (NLP)
-3. CLIP ViT-L/14 + обученная голова дают вероятность hateful (CV + NLP + ML)
-4. карта значимости показывает, на какие области смотрела модель (CV)
-5. мультимодальная LLM (Gemini или Qwen3-VL) объясняет решение по-русски (NLP)
+мем считается оскорбительным, если в нём есть хотя бы одно из двух:
+- ненависть к группе людей (как в датасете Hateful Memes): обученный
+  классификатор CLIP + FIM, усреднённый с оценкой VLM
+- грубость: мат, хамство, унижение. предобученная модель токсичности
+  текста плюс мнение VLM
 
-главная фишка для показа: текст можно поправить и пересчитать. в датасете
-одна и та же картинка с разными подписями бывает и безобидной, и hateful,
-и это видно вживую
+шаги при загрузке мема:
+1. EasyOCR достаёт текст (CV), русский текст LLM переводит для CLIP (NLP)
+2. CLIP ViT-L/14 + ансамбль голов дают вероятность ненависти (CV + NLP + ML)
+3. модель токсичности оценивает грубость текста (NLP)
+4. Grad-CAM показывает, куда смотрела модель (CV)
+5. VLM (Gemini) читает текст точнее OCR, объясняет решение и даёт свою оценку,
+   после чего всё пересчитывается
 
 запуск:
     python app.py
 """
 
+import difflib
 from pathlib import Path
 
 import gradio as gr
@@ -24,6 +28,7 @@ from dotenv import load_dotenv
 from memeguard.explain import analyze, get_llm, has_cyrillic, translate_to_english, verdict_score
 from memeguard.ocr import extract_text, get_reader
 from memeguard.pipeline import MemeGuard
+from memeguard.toxicity import toxicity
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -31,26 +36,23 @@ LLM = get_llm()
 HAS_LLM = LLM[0] is not None
 
 guard = MemeGuard(ROOT / "models")
-# модели OCR гружу сразу, иначе первый пользователь ждёт лишние 10+ секунд
+# модели OCR и токсичности гружу сразу, иначе первый пользователь ждёт лишние секунды
 get_reader("en")
 get_reader("ru")
+toxicity("прогрев")
+toxicity("warm up")
 
 ATTACK_RU = {
-    "none": "нет", "dehumanizing": "дегуманизация", "inferiority": "утверждение неполноценности",
-    "exclusion": "призыв к исключению", "mocking_hate_crime": "насмешка над преступлением ненависти",
+    "none": "нет", "dehumanizing": "дегуманизация",
+    "inferiority": "утверждение неполноценности", "exclusion": "призыв к исключению",
+    "mocking_hate_crime": "насмешка над преступлением ненависти",
     "slur": "оскорбительное обозначение группы", "stereotype": "стереотип", "other": "другое",
 }
+CONF_RU = {"low": "низкая", "medium": "средняя", "high": "высокая"}
 
-
-def verdict_label(prob):
-    return {"hateful": prob, "не hateful": 1 - prob}
-
-
-def verdict_md(prob):
-    thr = guard.threshold
-    if prob >= thr:
-        return f"### Модель: оскорбительный мем\nвероятность {prob:.0%}, порог {thr:.0%}"
-    return f"### Модель: не оскорбительный\nвероятность hateful {prob:.0%}, порог {thr:.0%}"
+# если VLM считает мем грубым, грубость не ниже этого значения: модель
+# токсичности видит только текст и не замечает грубость, которая в картинке
+VLM_RUDE_FLOOR = 0.75
 
 
 def clip_text(text):
@@ -60,106 +62,149 @@ def clip_text(text):
     return text
 
 
-def combine(prob, result):
+def decide(r):
     """
-    итог ансамбля: среднее вероятности классификатора и оценки VLM.
-    на dev это AUROC 0.811 против 0.737 у классификатора и 0.759 у VLM
-    (proj_3.ipynb, раздел 8). вес 0.5 и порог 0.5 не подбирались
+    итоговое решение по двум слоям. ненависть: если есть оценка VLM, беру
+    среднее классификатора и VLM (на dev AUROC 0.811 против 0.737 и 0.759
+    по отдельности, proj_3.ipynb раздел 8), порог 0.5 не подбирался;
+    без VLM - вероятность классификатора с его порогом
     """
-    score = verdict_score(result) if "error" not in result else None
-    return None if score is None else (prob + score) / 2
+    if r.get("vlm_score") is not None:
+        r["hate_score"] = (r["prob"] + r["vlm_score"]) / 2
+        r["hate"] = r["hate_score"] >= 0.5
+    else:
+        r["hate_score"] = r["prob"]
+        r["hate"] = r["prob"] >= guard.threshold
+
+    rude = r["toxicity"]["score"]
+    if r.get("vlm_rude"):
+        rude = max(rude, VLM_RUDE_FLOOR)
+    r["rude_score"] = rude
+    r["rude"] = rude >= 0.5
+    r["offensive"] = r["hate"] or r["rude"]
+    r["reasons"] = [name for name, flag in [("ненависть к группе", r["hate"]),
+                                            ("грубость", r["rude"])] if flag]
+    return r
 
 
-def explanation_md(result, prob):
-    if "error" in result:
-        return f"Объяснение недоступно: {result['error']}"
-    final = combine(prob, result)
-    verdict = "оскорбительный" if result["verdict"] == "hateful" else "не оскорбительный"
-    agree = (result["verdict"] == "hateful") == (prob >= guard.threshold)
-    groups = ", ".join(result["target_groups"]) or "нет"
+def score_text(image, img_emb, text):
+    """все оценки, которые зависят от текста мема"""
+    text_en = clip_text(text)
+    return {
+        "text": text, "text_en": text_en,
+        "prob": guard.score(img_emb, guard.encode_text(text_en)),
+        "threshold": guard.threshold,
+        "toxicity": toxicity(text),
+    }
+
+
+def assess(image, text="", explain=True, img_emb=None):
+    """
+    общий генератор для интерфейса и для сайта. отдаёт (результат, карта)
+    по мере готовности, чтобы вероятность была видна сразу, а не через
+    10 секунд ожидания VLM
+    """
+    manual = bool(text and text.strip())
+    if img_emb is None:
+        img_emb = guard.encode_image(image)
+    r = score_text(image, img_emb, text.strip() if manual else extract_text(image))
+    r.update(text_source="вручную" if manual else "OCR", explanation=None, stage="score")
+    yield decide(r), None, img_emb
+
+    heat = guard.saliency(image, r["text_en"])
+    r["stage"] = "saliency"
+    yield r, heat, img_emb
+
+    if explain and HAS_LLM:
+        # вероятность классификатора VLM не показываю: для ансамбля оценки
+        # должны быть независимыми, как в эксперименте на dev
+        e = analyze(image, r["text"], llm=LLM)
+        r["explanation"] = e
+        if "error" not in e:
+            # VLM читает текст точнее EasyOCR (особенно русский Impact):
+            # если расшифровки заметно расходятся, пересчитываю по версии VLM
+            vlm_text = e.get("meme_text", "").strip()
+            similar = difflib.SequenceMatcher(None, vlm_text, r["text"]).ratio()
+            if not manual and vlm_text and similar < 0.95:
+                r.update(score_text(image, img_emb, vlm_text), text_source="VLM")
+                heat = guard.saliency(image, r["text_en"])
+            r["vlm_score"] = verdict_score(e)
+            r["vlm_rude"] = e["rude"]
+        decide(r)
+    r["stage"] = "done"
+    yield r, heat, img_emb
+
+
+def verdict_md(r):
+    head = "🚫 Оскорбительный" if r["offensive"] else "✅ Нормальный"
+    reasons = f" ({', '.join(r['reasons'])})" if r["reasons"] else ""
+    hate_src = "классификатор + VLM" if r.get("vlm_score") is not None else "классификатор"
     lines = [
-        f"## Итог (классификатор + VLM): {'оскорбительный' if final >= 0.5 else 'не оскорбительный'}, "
-        f"{final:.0%}",
-        f"### VLM: {verdict} (уверенность: {result['confidence']})",
-        "" if agree else "> VLM не согласна с классификатором, мем стоит проверить вручную.",
-        f"**Что на картинке.** {result['image_description']}",
-        f"**Что значит текст.** {result['text_meaning']}",
+        f"## {head}{reasons}",
+        f"**Ненависть к группе:** {r['hate_score']:.0%} ({hate_src})  ",
+        f"**Грубость:** {r['rude_score']:.0%} (модель токсичности"
+        f"{' + VLM' if r.get('vlm_rude') else ''})  ",
+        f"Текст взят из: {r['text_source']}",
+    ]
+    return "\n".join(lines)
+
+
+def explanation_md(r):
+    e = r["explanation"]
+    if not e:
+        return ""
+    if "error" in e:
+        return f"Объяснение недоступно: {e['error']}"
+    vlm_hate = e["verdict"] == "hateful"
+    agree = vlm_hate == (r["prob"] >= guard.threshold)
+    groups = ", ".join(e["target_groups"]) or "нет"
+    lines = [
+        f"### Мнение VLM: {'ненависть к группе' if vlm_hate else 'ненависти нет'}"
+        f"{', грубый' if e['rude'] else ''} (уверенность {CONF_RU[e['confidence']]})",
+        "" if agree else "> VLM и классификатор расходятся в оценке ненависти: "
+                         "мем стоит проверить вручную.",
+        f"**Что на картинке.** {e['image_description']}",
+        f"**Что значит текст.** {e['text_meaning']}",
         f"**Атакуемые группы:** {groups}  ",
-        f"**Тип атаки:** {ATTACK_RU.get(result['attack_type'], result['attack_type'])}",
-        f"**Почему.** {result['explanation']}",
+        f"**Тип атаки:** {ATTACK_RU.get(e['attack_type'], e['attack_type'])}",
+        f"**Почему.** {e['explanation']}",
     ]
     return "\n\n".join(line for line in lines if line)
+
+
+def ui_outputs(r, heat, img_emb):
+    translated = r["text_en"] if r["text_en"] != r["text"] else ""
+    if r["stage"] == "score":
+        status = "Считаю карту значимости..."
+    elif r["stage"] == "saliency":
+        status = "VLM анализирует мем..." if HAS_LLM else ""
+    else:
+        status = explanation_md(r)
+    return r["text"], translated, verdict_md(r), heat, status, img_emb
 
 
 def run_analysis(image, explain):
     if image is None:
         raise gr.Error("Сначала загрузите мем")
-
-    text = extract_text(image)
-    text_en = clip_text(text)
-    img_emb = guard.encode_image(image)
-    prob = guard.score(img_emb, guard.encode_text(text_en))
-    translated = text_en if text_en != text else ""
-    yield (text, translated, verdict_label(prob), verdict_md(prob), None,
-           "Считаю карту значимости...", img_emb)
-
-    heat = guard.saliency(image, text_en)
-    waiting = "VLM анализирует мем..." if explain and HAS_LLM else ""
-    yield text, translated, verdict_label(prob), verdict_md(prob), heat, waiting, img_emb
-
-    if explain and HAS_LLM:
-        # вероятность классификатора VLM не показываю: для ансамбля оценки
-        # должны быть независимыми, как в эксперименте на dev
-        result = analyze(image, text, llm=LLM)
-        yield (text, translated, verdict_label(prob), verdict_md(prob), heat,
-               explanation_md(result, prob), img_emb)
-    elif explain:
-        yield (text, translated, verdict_label(prob), verdict_md(prob), heat,
-               "Объяснение отключено: не задан ключ LLM (см. README)", img_emb)
+    for r, heat, img_emb in assess(image, "", explain and HAS_LLM):
+        yield ui_outputs(r, heat, img_emb)
 
 
 def rescore(image, text, img_emb):
-    """пересчёт с отредактированным текстом: картинку заново не кодирую"""
+    """пересчёт с отредактированным текстом: картинку заново не кодирую, VLM не зову"""
     if image is None:
         raise gr.Error("Сначала загрузите мем")
-    if img_emb is None:
-        img_emb = guard.encode_image(image)
-    text_en = clip_text(text)
-    prob = guard.score(img_emb, guard.encode_text(text_en))
-    translated = text_en if text_en != text else ""
-    return translated, verdict_label(prob), verdict_md(prob), guard.saliency(image, text_en), img_emb
+    *_, (r, heat, img_emb) = assess(image, text or " ", explain=False, img_emb=img_emb)
+    out = ui_outputs(r, heat, img_emb)
+    return out[1], out[2], out[3], img_emb
 
 
 def web_analyze(image, text, explain):
-    """
-    эндпоинт для сайта на Vercel: те же шаги, но ответ в JSON.
-    text - если пустой, читаю OCR, иначе беру присланный (пересчёт после правки).
-    отдаю результат по частям, чтобы сайт показывал вероятность сразу,
-    не дожидаясь VLM
-    """
+    """эндпоинт для сайта: те же шаги, ответ в JSON по частям"""
     if image is None:
         raise gr.Error("нет картинки")
-    text = text.strip() if text else extract_text(image)
-    text_en = clip_text(text)
-    prob = guard.predict(image, text_en)
-    result = {"text": text, "text_en": text_en, "prob": prob,
-              "threshold": guard.threshold, "hateful": prob >= guard.threshold,
-              "explanation": None, "stage": "score"}
-    yield result, None
-
-    heat = guard.saliency(image, text_en)
-    result["stage"] = "saliency"
-    yield result, heat
-
-    if explain and HAS_LLM:
-        result["explanation"] = analyze(image, text, llm=LLM)
-        final = combine(prob, result["explanation"])
-        if final is not None:
-            result["vlm_score"] = verdict_score(result["explanation"])
-            result["combined"] = final
-            result["combined_hateful"] = final >= 0.5
-    result["stage"] = "done"
-    yield result, heat
+    for r, heat, _ in assess(image, text or "", explain):
+        yield r, heat
 
 
 examples_dir = ROOT / "examples"
@@ -169,9 +214,9 @@ examples = sorted(str(p) for p in examples_dir.glob("*") if p.suffix.lower() in
 with gr.Blocks(title="MemeGuard") as demo:
     gr.Markdown(
         "# MemeGuard\n"
-        "Мультимодальный детектор оскорбительных мемов. Загрузите мем: OCR прочитает "
-        "текст, CLIP ViT-L/14 с обученным классификатором оценит картинку и текст вместе, "
-        "а мультимодальная LLM объяснит решение.")
+        "Детектор оскорбительных мемов: ищет ненависть к группе людей (CLIP + обученный "
+        "классификатор) и грубость (модель токсичности текста), а мультимодальная LLM "
+        "объясняет решение.")
     img_state = gr.State(None)
 
     with gr.Row():
@@ -183,7 +228,6 @@ with gr.Blocks(title="MemeGuard") as demo:
                 gr.Examples(examples, inputs=image, label="Примеры")
         with gr.Column():
             verdict = gr.Markdown()
-            label = gr.Label(label="Вероятность", num_top_classes=2)
             text = gr.Textbox(label="Текст мема (можно исправить и пересчитать)", lines=2)
             translated = gr.Textbox(label="Перевод для CLIP", interactive=False)
             rescore_btn = gr.Button("Пересчитать с этим текстом")
@@ -192,12 +236,11 @@ with gr.Blocks(title="MemeGuard") as demo:
     explanation = gr.Markdown()
 
     run_btn.click(run_analysis, [image, explain],
-                  [text, translated, label, verdict, heat, explanation, img_state],
+                  [text, translated, verdict, heat, explanation, img_state],
                   api_name="analyze")
     rescore_btn.click(rescore, [image, text, img_state],
-                      [translated, label, verdict, heat, img_state], api_name="rescore")
-    text.submit(rescore, [image, text, img_state],
-                [translated, label, verdict, heat, img_state])
+                      [translated, verdict, heat, img_state], api_name="rescore")
+    text.submit(rescore, [image, text, img_state], [translated, verdict, heat, img_state])
     image.change(lambda _: None, image, img_state)
 
     # скрытые компоненты под API для сайта, в интерфейсе их не видно

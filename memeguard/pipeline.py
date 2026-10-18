@@ -18,6 +18,7 @@ from PIL import Image
 
 from memeguard.heads import build_head
 
+
 class MemeGuard:
     def __init__(self, models_dir="models", device="cpu"):
         models_dir = Path(models_dir)

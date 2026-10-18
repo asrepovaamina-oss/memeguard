@@ -36,8 +36,8 @@ PROVIDERS = {
 }
 
 # определение hateful взято из статьи датасета (Kiela et al., 2020),
-# чтобы модель оценивала по тем же правилам, что и разметчики
-SYSTEM_PROMPT = """Ты помогаешь модераторам контента разбирать мемы.
+# чтобы в экспериментах модель оценивала по тем же правилам, что и разметчики
+HATE_DEFINITION = """Ты помогаешь модераторам контента разбирать мемы.
 
 Мем считается hateful (оскорбительным), если он прямо или косвенно атакует людей \
 по защищённому признаку: этническая принадлежность, раса, национальность, \
@@ -52,8 +52,18 @@ SYSTEM_PROMPT = """Ты помогаешь модераторам контент
 
 Смысл мема часто рождается только из сочетания картинки и текста: безобидный текст \
 на определённой картинке может стать оскорбительным, и наоборот. Учитывай оба.
+"""
+
+# в продукте «оскорбительный» шире, чем в датасете: сюда же входит грубость.
+# поэтому VLM отдельно отвечает про ненависть к группе (как в датасете)
+# и отдельно про грубость, а итог считается в app.py
+SYSTEM_PROMPT = HATE_DEFINITION + """
+Отдельно от ненависти оцени грубость: мат, хамство, унижение или оскорбление \
+человека, пошлость. Грубый мем не обязательно hateful, и наоборот.
 
 Ответь строго одним JSON-объектом с полями:
+- "meme_text": весь текст с картинки дословно, в исходном языке, строчными буквами, \
+мат сохраняй как есть
 - "image_description": что изображено, 1-2 предложения
 - "text_meaning": что говорит текст и как он связан с картинкой, 1-2 предложения
 - "verdict": "hateful" или "not_hateful"
@@ -61,7 +71,9 @@ SYSTEM_PROMPT = """Ты помогаешь модераторам контент
 - "target_groups": список атакуемых групп по-русски, пустой список если их нет
 - "attack_type": одно из "none", "dehumanizing", "inferiority", "exclusion", \
 "mocking_hate_crime", "slur", "stereotype", "other"
-- "explanation": почему мем оскорбителен или нет, 2-3 предложения
+- "rude": true, если в меме есть мат, хамство или унижение, иначе false
+- "explanation": почему мем оскорбителен или нет (и про ненависть, и про грубость), \
+2-3 предложения
 
 Пиши по-русски, коротко и по делу. Цитаты из мема оставляй на языке оригинала."""
 
@@ -136,12 +148,13 @@ def _parse(raw):
             raise ValueError(f"поле {field} = {data.get(field)!r}")
     if not isinstance(data.get("target_groups"), list):
         data["target_groups"] = []
-    for field in ["image_description", "text_meaning", "explanation"]:
-        data[field] = str(data.get(field, ""))
+    for field in ["meme_text", "image_description", "text_meaning", "explanation"]:
+        data[field] = str(data.get(field) or "")
+    data["rude"] = data.get("rude") in (True, "true", "True", 1)
     return data
 
 
-CLASSIFY_PROMPT = SYSTEM_PROMPT.split("Ответь строго")[0] + (
+CLASSIFY_PROMPT = HATE_DEFINITION + "\n" + (
     'Ответь строго одним JSON-объектом с двумя полями: "verdict" ("hateful" или '
     '"not_hateful") и "confidence" ("low", "medium" или "high"). Без пояснений.')
 
@@ -165,9 +178,30 @@ def classify(image, text, llm=None):
                        response_format={"type": "json_object"})
     raw = _content(response)
     data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-    if data.get("verdict") not in ENUMS["verdict"] or data.get("confidence") not in ENUMS["confidence"]:
+    if (data.get("verdict") not in ENUMS["verdict"]
+            or data.get("confidence") not in ENUMS["confidence"]):
         raise ValueError(f"неожиданный ответ: {raw[:200]}")
     return {"verdict": data["verdict"], "confidence": data["confidence"]}
+
+
+READ_TEXT_PROMPT = (
+    "Перепиши весь текст с картинки мема дословно, в исходном языке, одной строкой, "
+    "строчными буквами. Сохраняй мат и опечатки как есть. Если текста нет, ответь пустой "
+    "строкой. Ответь только текстом.")
+
+
+def read_text(image, llm=None):
+    """
+    OCR силами VLM. EasyOCR плохо читает кириллический шрифт Impact, которым
+    пишут русские мемы («вы не охуели часом» превращалось в «вышромешм»),
+    а VLM читает такие подписи почти без ошибок, но медленнее (~6 с на мем)
+    """
+    client, model = llm or get_llm()
+    response = _create(client, model, temperature=0, messages=[{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": _image_url(image, max_side=768)}},
+        {"type": "text", "text": READ_TEXT_PROMPT},
+    ]}])
+    return _content(response).strip().strip("«»\"").lower()
 
 
 def has_cyrillic(text):
@@ -178,7 +212,7 @@ def translate_to_english(text, llm=None):
     """
     текстовый энкодер CLIP от OpenAI учился только на английском, русский
     текст он почти не понимает. поэтому русские подписи перевожу через LLM
-    и уже перевод отдаю в CLIP. проверяю этот приём в scripts/eval_ru_memes.py
+    и уже перевод отдаю в CLIP. проверяю этот приём в scripts/ru_experiments.py
     """
     client, model = llm or get_llm()
     if client is None:
