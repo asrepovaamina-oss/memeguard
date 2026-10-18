@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from memeguard.pipeline import MemeGuard  # noqa: E402
+from memeguard.toxicity import toxicity  # noqa: E402
 
 DATA = ROOT / "data"
 LABELS = DATA / "ru_memes" / "labels.csv"
@@ -36,13 +37,21 @@ PAGE = 12
 
 def load_table():
     df = pd.read_csv(LABELS, dtype={"label": "string"}).fillna({"text": "", "label": ""})
+    # текст от VLM точнее EasyOCR, показываю и использую его, если он есть
+    vlm_path = DATA / "ru_memes" / "cache" / "vlm_text.csv"
+    if vlm_path.exists():
+        vlm = pd.read_csv(vlm_path).fillna("")
+        df = df.merge(vlm, on="file", how="left").fillna({"text_vlm": ""})
+        df["text"] = df["text_vlm"].where(df["text_vlm"] != "", df["text"])
     # подозрительность считаю один раз и кэширую, новые мемы досчитываю
     sus = pd.read_csv(SUSPICION) if SUSPICION.exists() else pd.DataFrame(columns=["file", "p"])
     missing = df[~df["file"].isin(sus["file"])]
     if len(missing):
         device = "mps" if torch.backends.mps.is_available() else "cpu"
         guard = MemeGuard(ROOT / "models", device=device)
-        rows = [{"file": r.file, "p": guard.predict(Image.open(DATA / r.file), r.text)}
+        # подозрительность: максимум из классификатора ненависти и токсичности текста
+        rows = [{"file": r.file, "p": max(guard.predict(Image.open(DATA / r.file), r.text),
+                                          toxicity(r.text)["score"])}
                 for r in tqdm(missing.itertuples(), total=len(missing), desc="подозрительность")]
         sus = pd.concat([sus, pd.DataFrame(rows)])
         sus.to_csv(SUSPICION, index=False)
@@ -57,6 +66,7 @@ TABLE = load_table()
 
 
 def save_labels():
+    # в файл пишу только метки, исходный текст EasyOCR в labels.csv не трогаю
     out = pd.read_csv(LABELS, dtype={"label": "string"})
     out = out.drop(columns="label").merge(TABLE[["file", "label"]], on="file", how="left")
     out[["file", "source", "label", "text"]].to_csv(LABELS, index=False)
@@ -112,9 +122,9 @@ def go(page, delta):
 with gr.Blocks(title="Разметка русских мемов") as demo:
     gr.Markdown(
         "# Разметка русских мемов\n"
-        "Кликните по **оскорбительным** мемам (атака на группу по национальности, религии, "
-        "полу, ориентации, инвалидности и т.п.). Просто грубые или чёрные шутки без атаки "
-        "на группу считаются нормальными. Потом нажмите **Сохранить страницу**: отмеченные "
+        "Кликните по **оскорбительным** мемам. Оскорбительный = **ненависть к группе** "
+        "(национальность, религия, пол, ориентация, инвалидность) **или грубость** (мат, "
+        "хамство, унижение, пошлость). Потом нажмите **Сохранить страницу**: отмеченные "
         "станут оскорбительными, остальные нормальными. p - подозрительность по модели.")
     page = gr.State(first_unlabeled_page())
     marked = gr.State(set())

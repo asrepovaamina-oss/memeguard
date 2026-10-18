@@ -174,7 +174,7 @@ def classify(image, text, llm=None):
             {"type": "text", "text": f"Текст на меме: «{text or '(текста нет)'}»"},
         ]},
     ]
-    response = _create(client, model, messages=messages, temperature=0,
+    response = _create(client, model, messages=messages, temperature=0, max_tokens=100,
                        response_format={"type": "json_object"})
     raw = _content(response)
     data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
@@ -197,10 +197,12 @@ def read_text(image, llm=None):
     а VLM читает такие подписи почти без ошибок, но медленнее (~6 с на мем)
     """
     client, model = llm or get_llm()
-    response = _create(client, model, temperature=0, messages=[{"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": _image_url(image, max_side=768)}},
-        {"type": "text", "text": READ_TEXT_PROMPT},
-    ]}])
+    # лимит обязателен: на одном меме локальная модель зациклилась и писала бесконечно
+    response = _create(client, model, temperature=0, max_tokens=300, messages=[
+        {"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": _image_url(image, max_side=768)}},
+            {"type": "text", "text": READ_TEXT_PROMPT},
+        ]}])
     return _content(response).strip().strip("«»\"").lower()
 
 
@@ -220,7 +222,7 @@ def translate_to_english(text, llm=None):
     try:
         response = _create(
             client, model,
-            temperature=0,
+            temperature=0, max_tokens=400,
             messages=[
                 {"role": "system", "content": (
                     "Переведи подпись к мему на английский так, как её написал бы "
@@ -265,6 +267,7 @@ def analyze(image, text, model_prob=None, llm=None, retries=2):
                 # первая попытка детерминированная, на повторах даю модели
                 # немного свободы, иначе она повторит тот же битый ответ
                 temperature=0 if attempt == 0 else 0.5,
+                max_tokens=4000,
                 response_format={"type": "json_object"},
             )
             return _parse(_content(response))
