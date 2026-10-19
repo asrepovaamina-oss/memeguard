@@ -25,6 +25,7 @@ from pathlib import Path
 import gradio as gr
 from dotenv import load_dotenv
 
+from memeguard import monitoring
 from memeguard.explain import analyze, get_llm, has_cyrillic, translate_to_english, verdict_score
 from memeguard.ocr import extract_text, get_reader
 from memeguard.pipeline import MemeGuard
@@ -87,15 +88,16 @@ def decide(r):
     return r
 
 
-def score_text(image, img_emb, text):
+def score_text(image, img_emb, text, timer):
     """все оценки, которые зависят от текста мема"""
-    text_en = clip_text(text)
-    return {
-        "text": text, "text_en": text_en,
-        "prob": guard.score(img_emb, guard.encode_text(text_en)),
-        "threshold": guard.threshold,
-        "toxicity": toxicity(text),
-    }
+    with timer("translate"):
+        text_en = clip_text(text)
+    with timer("clip"):
+        prob = guard.score(img_emb, guard.encode_text(text_en))
+    with timer("toxicity"):
+        tox = toxicity(text)
+    return {"text": text, "text_en": text_en, "prob": prob,
+            "threshold": guard.threshold, "toxicity": tox}
 
 
 def assess(image, text="", explain=True, img_emb=None):
@@ -104,21 +106,28 @@ def assess(image, text="", explain=True, img_emb=None):
     по мере готовности, чтобы вероятность была видна сразу, а не через
     10 секунд ожидания VLM
     """
+    timer = monitoring.Timer()
     manual = bool(text and text.strip())
     if img_emb is None:
-        img_emb = guard.encode_image(image)
-    r = score_text(image, img_emb, text.strip() if manual else extract_text(image))
+        with timer("clip"):
+            img_emb = guard.encode_image(image)
+    if not manual:
+        with timer("ocr"):
+            text = extract_text(image)
+    r = score_text(image, img_emb, text.strip(), timer)
     r.update(text_source="вручную" if manual else "OCR", explanation=None, stage="score")
     yield decide(r), None, img_emb
 
-    heat = guard.saliency(image, r["text_en"])
+    with timer("saliency"):
+        heat = guard.saliency(image, r["text_en"])
     r["stage"] = "saliency"
     yield r, heat, img_emb
 
     if explain and HAS_LLM:
         # вероятность классификатора VLM не показываю: для ансамбля оценки
         # должны быть независимыми, как в эксперименте на dev
-        e = analyze(image, r["text"], llm=LLM)
+        with timer("vlm"):
+            e = analyze(image, r["text"], llm=LLM)
         r["explanation"] = e
         if "error" not in e:
             # VLM читает текст точнее EasyOCR (особенно русский Impact):
@@ -126,12 +135,23 @@ def assess(image, text="", explain=True, img_emb=None):
             vlm_text = e.get("meme_text", "").strip()
             similar = difflib.SequenceMatcher(None, vlm_text, r["text"]).ratio()
             if not manual and vlm_text and similar < 0.95:
-                r.update(score_text(image, img_emb, vlm_text), text_source="VLM")
-                heat = guard.saliency(image, r["text_en"])
+                r.update(score_text(image, img_emb, vlm_text, timer), text_source="VLM")
+                with timer("saliency"):
+                    heat = guard.saliency(image, r["text_en"])
             r["vlm_score"] = verdict_score(e)
             r["vlm_rude"] = e["rude"]
         decide(r)
     r["stage"] = "done"
+    e = r.get("explanation") or {}
+    vlm_ok = bool(e) and "error" not in e
+    monitoring.log_request({
+        "ms": {**timer.ms, "total": timer.total()},
+        "manual_text": manual, "text_source": r["text_source"],
+        "vlm_called": bool(e), "vlm_error": e.get("error"), "vlm_model": e.get("model"),
+        "disagree": vlm_ok and (e["verdict"] == "hateful") != (r["prob"] >= guard.threshold),
+        "offensive": r["offensive"], "hate": r["hate"], "rude": r["rude"],
+        "prob": r["prob"], "toxicity": r["toxicity"]["score"],
+    })
     yield r, heat, img_emb
 
 
@@ -235,6 +255,10 @@ with gr.Blocks(title="MemeGuard") as demo:
 
     explanation = gr.Markdown()
 
+    with gr.Accordion("📊 Мониторинг", open=False):
+        stats = gr.Markdown(monitoring.summary_md)
+        gr.Button("Обновить", size="sm").click(monitoring.summary_md, None, stats)
+
     run_btn.click(run_analysis, [image, explain],
                   [text, translated, verdict, heat, explanation, img_state],
                   api_name="analyze")
@@ -253,6 +277,9 @@ with gr.Blocks(title="MemeGuard") as demo:
         api_btn = gr.Button()
     api_btn.click(web_analyze, [api_image, api_text, api_explain], [api_json, api_heat],
                   api_name="web_analyze")
+    stats_btn = gr.Button(visible=False)
+    stats_json = gr.JSON(visible=False)
+    stats_btn.click(monitoring.summary, None, stats_json, api_name="stats")
 
 
 if __name__ == "__main__":

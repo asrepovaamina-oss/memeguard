@@ -299,7 +299,10 @@ def analyze(image, text, model_prob=None, llm=None, retries=2):
                 max_tokens=4000,
                 response_format={"type": "json_object"},
             )
-            return _parse(_content(response))
+            data = _parse(_content(response))
+            # какая модель из цепочки ответила: нужно для мониторинга лимитов
+            data["model"] = (response.model or "").removeprefix("models/")
+            return data
         except openai.RateLimitError:
             return {"error": "превышен бесплатный лимит запросов, попробуйте через минуту"}
         except openai.APIConnectionError:

@@ -234,6 +234,16 @@ figcaption { font-weight: 700; font-size: 14px; margin-top: 10px; }
 .bar-row.best { font-weight: 700; }
 .bar-val { font: 700 22px Oswald, Impact, sans-serif; text-align: right; }
 
+/* мониторинг */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat { background: var(--paper); border: 3px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 18px; }
+.stat b { display: block; font: 700 38px/1 Oswald, Impact, sans-serif; margin-bottom: 6px; }
+.stat span { font-size: 14px; color: var(--muted); }
+.stat:nth-child(1) { background: var(--yellow); color: #111; }
+.stat:nth-child(1) span { color: #333; }
+.stats .hint { grid-column: 1 / -1; }
+@media (max-width: 860px) { .stats { grid-template-columns: 1fr 1fr; } }
+
 /* подвал */
 .foot { margin-top: 96px; background: #111; color: #f6f3ea; border-top: 3px solid #111; padding: 40px 0 48px; }
 .foot a { color: var(--yellow); }

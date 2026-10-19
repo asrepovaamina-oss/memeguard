@@ -133,6 +133,7 @@ async function run(text = "") {
       if (r.stage === "done") {
         setStatus("");
         if (!text) renderExplanation(r);
+        loadStats();
       }
     }
   } catch (err) {
@@ -176,5 +177,33 @@ $("bars").innerHTML = RESULTS.map((r) => `
 $("space-link").href = BACKEND_URL;
 $("repo-link").href = REPO_URL;
 
+// мониторинг: сводка из журнала запросов на сервере
+async function loadStats() {
+  try {
+    const client = await getClient();
+    const { data: [s] } = await client.predict("/stats", []);
+    if (!s.requests) {
+      $("stats").innerHTML = '<p class="hint">Запросов пока не было. Загрузите мем выше.</p>';
+      return;
+    }
+    const sec = (ms) => (ms == null ? "нет" : `${(ms / 1000).toFixed(1)} с`);
+    const pct = (x) => (x == null ? "нет" : `${Math.round(x * 100)}%`);
+    const cards = [
+      [s.requests, "запросов к модели"],
+      [sec(s.total_median_ms), `медиана времени ответа (95% быстрее ${sec(s.total_p95_ms)})`],
+      [pct(s.vlm_error_rate), `ошибок VLM из ${s.vlm_calls} вызовов`],
+      [pct(s.disagreement_rate), "мемов, где VLM и классификатор расходятся"],
+      [pct(s.ocr_fixed_rate), "мемов, где VLM исправил текст OCR"],
+      [pct(s.offensive_rate), "признаны оскорбительными"],
+      [sec(s.steps.vlm?.median_ms), "медиана VLM, самый долгий шаг"],
+      [sec(s.steps.saliency?.median_ms), "медиана Grad-CAM"],
+    ];
+    $("stats").innerHTML = cards.map(([v, t]) => `<div class="stat"><b>${esc(String(v))}</b><span>${esc(t)}</span></div>`).join("");
+  } catch {
+    $("stats").innerHTML = '<p class="hint">Статистика доступна, когда сервер с моделью запущен.</p>';
+  }
+}
+
 // подключаюсь заранее, пока человек выбирает картинку
 getClient().catch(() => {});
+loadStats();

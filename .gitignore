@@ -36,3 +36,6 @@ data/.DS_Store
 data/ru_memes/labels.csv
 data/ru_memes/suspicion.csv
 data/ru_memes/cache/
+
+# журнал мониторинга демо
+logs/
