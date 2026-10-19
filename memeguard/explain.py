@@ -109,12 +109,18 @@ def get_llm(provider=None):
 
 
 def _create(client, models, **kwargs):
-    """запрос с перебором моделей из цепочки (через запятую) при упоре в лимит"""
+    """
+    запрос с перебором моделей из цепочки (через запятую). следующую модель
+    пробую не только при упоре в лимит, но и когда сервер перегружен (503)
+    или не ответил вовремя: мониторинг показал, что у бесплатного Gemini
+    такое бывает, и без VLM на русских мемах остаётся кривой текст EasyOCR
+    """
     names = [m.strip() for m in models.split(",") if m.strip()]
     for i, name in enumerate(names):
         try:
             return client.chat.completions.create(model=name, **kwargs)
-        except openai.RateLimitError:
+        except (openai.RateLimitError, openai.InternalServerError,
+                openai.APITimeoutError, openai.APIConnectionError):
             if i == len(names) - 1:
                 raise
 
