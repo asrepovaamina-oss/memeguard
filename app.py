@@ -8,7 +8,8 @@
   текста плюс мнение VLM
 
 шаги при загрузке мема:
-1. EasyOCR достаёт текст (CV), русский текст LLM переводит для CLIP (NLP)
+1. EasyOCR находит рамки с текстом (детектор CRAFT) и читает их (CV),
+   русский текст LLM переводит для CLIP (NLP)
 2. CLIP ViT-L/14 + ансамбль голов дают вероятность ненависти (CV + NLP + ML)
 3. модель токсичности оценивает грубость текста (NLP)
 4. Grad-CAM показывает, куда смотрела модель (CV)
@@ -27,7 +28,7 @@ from dotenv import load_dotenv
 
 from memeguard import monitoring
 from memeguard.explain import analyze, get_llm, has_cyrillic, translate_to_english, verdict_score
-from memeguard.ocr import extract_text, get_reader
+from memeguard.ocr import draw_boxes, extract_text_and_boxes, get_reader
 from memeguard.pipeline import MemeGuard
 from memeguard.toxicity import toxicity
 
@@ -111,17 +112,20 @@ def assess(image, text="", explain=True, img_emb=None):
     if img_emb is None:
         with timer("clip"):
             img_emb = guard.encode_image(image)
+    boxes_img = None
     if not manual:
         with timer("ocr"):
-            text = extract_text(image)
+            text, boxes = extract_text_and_boxes(image)
+            boxes_img = draw_boxes(image, boxes)
     r = score_text(image, img_emb, text.strip(), timer)
-    r.update(text_source="вручную" if manual else "OCR", explanation=None, stage="score")
-    yield decide(r), None, img_emb
+    r.update(text_source="вручную" if manual else "OCR", explanation=None, stage="score",
+             ocr_boxes=None if manual else len(boxes))
+    yield decide(r), None, boxes_img, img_emb
 
     with timer("saliency"):
         heat = guard.saliency(image, r["text_en"])
     r["stage"] = "saliency"
-    yield r, heat, img_emb
+    yield r, heat, boxes_img, img_emb
 
     if explain and HAS_LLM:
         # вероятность классификатора VLM не показываю: для ансамбля оценки
@@ -152,7 +156,7 @@ def assess(image, text="", explain=True, img_emb=None):
         "offensive": r["offensive"], "hate": r["hate"], "rude": r["rude"],
         "prob": r["prob"], "toxicity": r["toxicity"]["score"],
     })
-    yield r, heat, img_emb
+    yield r, heat, boxes_img, img_emb
 
 
 def verdict_md(r):
@@ -192,7 +196,7 @@ def explanation_md(r):
     return "\n\n".join(line for line in lines if line)
 
 
-def ui_outputs(r, heat, img_emb):
+def ui_outputs(r, heat, boxes_img, img_emb):
     translated = r["text_en"] if r["text_en"] != r["text"] else ""
     if r["stage"] == "score":
         status = "Считаю карту значимости..."
@@ -200,22 +204,23 @@ def ui_outputs(r, heat, img_emb):
         status = "VLM анализирует мем..." if HAS_LLM else ""
     else:
         status = explanation_md(r)
-    return r["text"], translated, verdict_md(r), heat, status, img_emb
+    return r["text"], translated, verdict_md(r), heat, boxes_img, status, img_emb
 
 
 def run_analysis(image, explain):
     if image is None:
         raise gr.Error("Сначала загрузите мем")
-    for r, heat, img_emb in assess(image, "", explain and HAS_LLM):
-        yield ui_outputs(r, heat, img_emb)
+    for r, heat, boxes_img, img_emb in assess(image, "", explain and HAS_LLM):
+        yield ui_outputs(r, heat, boxes_img, img_emb)
 
 
 def rescore(image, text, img_emb):
     """пересчёт с отредактированным текстом: картинку заново не кодирую, VLM не зову"""
     if image is None:
         raise gr.Error("Сначала загрузите мем")
-    *_, (r, heat, img_emb) = assess(image, text or " ", explain=False, img_emb=img_emb)
-    out = ui_outputs(r, heat, img_emb)
+    *_, (r, heat, boxes_img, img_emb) = assess(image, text or " ", explain=False,
+                                               img_emb=img_emb)
+    out = ui_outputs(r, heat, boxes_img, img_emb)
     return out[1], out[2], out[3], img_emb
 
 
@@ -223,8 +228,8 @@ def web_analyze(image, text, explain):
     """эндпоинт для сайта: те же шаги, ответ в JSON по частям"""
     if image is None:
         raise gr.Error("нет картинки")
-    for r, heat, _ in assess(image, text or "", explain):
-        yield r, heat
+    for r, heat, boxes_img, _ in assess(image, text or "", explain):
+        yield r, heat, boxes_img
 
 
 examples_dir = ROOT / "examples"
@@ -251,7 +256,9 @@ with gr.Blocks(title="MemeGuard") as demo:
             text = gr.Textbox(label="Текст мема (можно исправить и пересчитать)", lines=2)
             translated = gr.Textbox(label="Перевод для CLIP", interactive=False)
             rescore_btn = gr.Button("Пересчитать с этим текстом")
-            heat = gr.Image(label="Куда смотрела модель", height=300)
+            with gr.Row():
+                heat = gr.Image(label="Grad-CAM: куда смотрела модель", height=300)
+                boxes = gr.Image(label="Детектор текста: где OCR нашёл текст", height=300)
 
     explanation = gr.Markdown()
 
@@ -260,7 +267,7 @@ with gr.Blocks(title="MemeGuard") as demo:
         gr.Button("Обновить", size="sm").click(monitoring.summary_md, None, stats)
 
     run_btn.click(run_analysis, [image, explain],
-                  [text, translated, verdict, heat, explanation, img_state],
+                  [text, translated, verdict, heat, boxes, explanation, img_state],
                   api_name="analyze")
     rescore_btn.click(rescore, [image, text, img_state],
                       [translated, verdict, heat, img_state], api_name="rescore")
@@ -274,8 +281,10 @@ with gr.Blocks(title="MemeGuard") as demo:
         api_explain = gr.Checkbox(value=True)
         api_json = gr.JSON()
         api_heat = gr.Image(type="pil")
+        api_boxes = gr.Image(type="pil")
         api_btn = gr.Button()
-    api_btn.click(web_analyze, [api_image, api_text, api_explain], [api_json, api_heat],
+    api_btn.click(web_analyze, [api_image, api_text, api_explain],
+                  [api_json, api_heat, api_boxes],
                   api_name="web_analyze")
     stats_btn = gr.Button(visible=False)
     stats_json = gr.JSON(visible=False)

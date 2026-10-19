@@ -110,10 +110,16 @@
               стать безобидной или наоборот.</p>
           </div>
 
-          <figure id="heat-wrap" hidden>
-            <img id="heat" alt="Карта значимости Grad-CAM">
-            <figcaption>🔥 Grad-CAM: куда смотрела модель</figcaption>
-          </figure>
+          <div class="figs">
+            <figure id="boxes-wrap" hidden>
+              <img id="boxes" alt="Рамки, где детектор нашёл текст">
+              <figcaption id="boxes-cap">🔎 Детектор текста: где OCR нашёл текст</figcaption>
+            </figure>
+            <figure id="heat-wrap" hidden>
+              <img id="heat" alt="Карта значимости Grad-CAM">
+              <figcaption>🔥 Grad-CAM: куда смотрела модель</figcaption>
+            </figure>
+          </div>
         </div>
       </div>
 
@@ -123,7 +129,7 @@
     <section id="how" class="wrap">
       <h2><span class="num">02</span> Как это работает</h2>
       <ol class="steps">
-        <li class="c-yellow"><span class="tag">CV</span><h3>OCR</h3><p>EasyOCR читает подпись. Две модели, английская и русская, выбор по кириллице.</p></li>
+        <li class="c-yellow"><span class="tag">CV</span><h3>OCR</h3><p>Детектор CRAFT находит рамки с текстом, распознаватель EasyOCR читает их. Две модели, английская и русская.</p></li>
         <li class="c-pink"><span class="tag">NLP</span><h3>Перевод</h3><p>Текстовый энкодер CLIP знает только английский, поэтому русские подписи переводит LLM.</p></li>
         <li class="c-blue"><span class="tag">CV</span><span class="tag">NLP</span><h3>CLIP ViT-L/14</h3><p>Картинка и текст превращаются в векторы в одном пространстве.</p></li>
         <li class="c-green"><span class="tag">ML</span><h3>FIM-ансамбль</h3><p>Матрица взаимодействия (Hate-CLIPper) взвешивает каждую пару признаков «картинка × текст». Три модели голосуют.</p></li>

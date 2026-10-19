@@ -13,6 +13,7 @@ OCR: достаю текст с картинки мема
 from functools import lru_cache
 
 import numpy as np
+from PIL import ImageDraw
 
 
 @lru_cache(maxsize=None)
@@ -23,16 +24,21 @@ def get_reader(lang):
 
 
 def _read(image_np, lang, min_conf):
-    """возвращаю (текст, средняя уверенность)"""
+    """
+    возвращаю (текст, рамки). EasyOCR работает в два шага: детектор CRAFT
+    находит области с текстом (рамки), распознаватель читает буквы в каждой.
+    рамки - это четырёхугольники [(x, y) x 4] вместе с текстом и уверенностью
+    """
     items = []
     for box, text, conf in get_reader(lang).readtext(image_np):
         if conf < min_conf:
             continue
         ys = [p[1] for p in box]
         items.append({"x": min(p[0] for p in box), "y": (min(ys) + max(ys)) / 2,
-                      "h": max(ys) - min(ys), "text": text, "conf": conf})
+                      "h": max(ys) - min(ys), "text": text, "conf": float(conf),
+                      "box": [tuple(map(float, p)) for p in box]})
     if not items:
-        return "", 0.0
+        return "", []
 
     # мемы читаются сверху вниз, а внутри строки слева направо.
     # слово попадает в текущую строку, если его центр по вертикали
@@ -44,25 +50,47 @@ def _read(image_np, lang, min_conf):
             lines[-1].append(it)
         else:
             lines.append([it])
-    words = [it["text"] for line in lines for it in sorted(line, key=lambda it: it["x"])]
-    # средняя уверенность, взвешенная по длине слов: длинные слова важнее
-    weights = np.array([len(it["text"]) for it in items], dtype=float)
-    conf = float(np.average([it["conf"] for it in items], weights=weights))
-    return " ".join(words).lower().strip(), conf
+    ordered = [it for line in lines for it in sorted(line, key=lambda it: it["x"])]
+    text = " ".join(it["text"] for it in ordered).lower().strip()
+    return text, [{"box": it["box"], "text": it["text"], "conf": it["conf"]} for it in ordered]
 
 
-def extract_text(image, min_conf=0.2):
+def extract_text_and_boxes(image, min_conf=0.2):
     """
     image - PIL.Image
-    возвращаю строку в нижнем регистре, как в разметке Hateful Memes
+    возвращаю (текст в нижнем регистре, как в разметке Hateful Memes; рамки)
     """
     image_np = np.array(image.convert("RGB"))
-    text_ru, _ = _read(image_np, "ru", min_conf)
+    text_ru, boxes_ru = _read(image_np, "ru", min_conf)
     letters = [ch for ch in text_ru if ch.isalpha()]
     cyrillic = sum("а" <= ch <= "я" or ch == "ё" for ch in letters)
     # русской модели верю, только если она реально нашла кириллицу.
     # сравнение по уверенности не сработало: на английских мемах русская
     # модель бывает уверенно неправа
     if letters and cyrillic / len(letters) > 0.5:
-        return text_ru
-    return _read(image_np, "en", min_conf)[0]
+        return text_ru, boxes_ru
+    return _read(image_np, "en", min_conf)
+
+
+def extract_text(image, min_conf=0.2):
+    return extract_text_and_boxes(image, min_conf)[0]
+
+
+def draw_boxes(image, boxes, max_side=640):
+    """
+    рисую рамки детектора поверх мема: зелёные - уверенно прочитанный текст,
+    жёлтые - неуверенно (там OCR чаще ошибается)
+    """
+    image = image.convert("RGB")
+    scale = min(1.0, max_side / max(image.size))
+    image = image.resize((round(image.width * scale), round(image.height * scale)))
+    draw = ImageDraw.Draw(image)
+    width = max(3, round(max(image.size) / 90))
+    for i, b in enumerate(boxes, 1):
+        pts = [(x * scale, y * scale) for x, y in b["box"]]
+        color = (61, 220, 132) if b["conf"] >= 0.6 else (255, 225, 77)
+        draw.line(pts + [pts[0]], fill=color, width=width)
+        x, y = pts[0]
+        draw.rectangle([x, max(0, y - 14), x + 8 + 7 * len(str(i)), max(14, y)], fill=color)
+        draw.text((x + 3, max(0, y - 14)), str(i), fill=(0, 0, 0))
+    return image

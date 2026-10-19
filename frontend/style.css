@@ -189,7 +189,8 @@ textarea {
 textarea:focus { outline: none; box-shadow: 4px 4px 0 var(--pink); }
 .hint { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
 
-figure { margin: 24px 0 0; }
+.figs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+figure { margin: 0; }
 figure img { width: 100%; max-width: 340px; display: block; border: 3px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-sm); }
 figcaption { font-weight: 700; font-size: 14px; margin-top: 10px; }
 
