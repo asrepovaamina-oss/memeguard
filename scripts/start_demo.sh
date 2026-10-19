@@ -17,6 +17,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# если демо уже запускалось (например, в другом окне терминала), останавливаю
+# старый запуск: иначе порт 7860 занят старым приложением со старым адресом,
+# и сайт не может достучаться до модели
+if pgrep -f "Python app.py" >/dev/null || pgrep -f "nokey@localhost.run" >/dev/null \
+    || pgrep -f "cloudflared tunnel" >/dev/null; then
+  echo "останавливаю предыдущий запуск демо..."
+  pkill -f "Python app.py" || true
+  pkill -f "cloudflared tunnel" || true
+  pkill -f "nokey@localhost.run" || true
+  sleep 3
+fi
+
 LOGS=$(mktemp -d)
 APP_PID=""
 TUN_PID=""
